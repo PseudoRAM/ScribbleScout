@@ -140,7 +140,17 @@ There is no cloud sync, analytics, AI processing, or note transmission. Storage 
 
 ## Tests
 
-Run **Product → Test** (⌘U) in Xcode, or use an installed simulator:
+Unit and persistence tests use Apple's [Swift Testing](https://developer.apple.com/documentation/testing) framework, included with Xcode. Use `@Test`, `#expect`, and `#require` for new tests; use XCTest / XCUIAutomation when adding UI or performance tests. No third-party testing packages are needed.
+
+For fast logic tests, run from the repository root:
+
+```sh
+swift test
+```
+
+This tests the app's actual Foundation-only note models through Swift Package Manager. It checks metadata round trips for every paper style, compatibility with existing notes that omit an ink filename, and rejection of damaged metadata. It builds only those models and tests; no app, simulator, signing, or network access is needed. The first run compiles the package; subsequent runs reuse the build.
+
+For PencilKit persistence, recovery, and autosave tests, run **Product → Test** (⌘U) in Xcode, or use an installed simulator:
 
 ```sh
 xcodebuild -project ScribbleScout.xcodeproj -scheme ScribbleScout \
@@ -148,13 +158,19 @@ xcodebuild -project ScribbleScout.xcodeproj -scheme ScribbleScout \
   -derivedDataPath build CODE_SIGNING_ALLOWED=NO test
 ```
 
-Choose a simulator available on your Mac if that model is not installed. **Five tests pass**, using real PencilKit strokes to verify:
+Choose a simulator available on your Mac if that model is not installed. The suite uses real PencilKit strokes and a separate temporary storage directory per test, so tests can run in parallel without sharing saved notes. It covers:
 
 - Ink, text, paper, and viewport round trips, with separate notes kept isolated.
 - Recovery from damaged metadata and an interrupted ink write.
 - Recovery from a corrupt latest drawing.
 - Retention of only the current and previous drawing snapshots.
-- Preservation of in-memory edits when saving fails.
+- Preservation of in-memory edits when saving fails, and successful retry after storage becomes available.
+- Round trips for every paper style.
+- Recovery from missing drawings, mismatched note IDs, and invalid drawing paths.
+- Library ordering and warnings while preserving unreadable files.
+- Autosave of the latest text and ink; viewport saves preserve the edit date and reuse ink.
+
+Tests run locally; there is no automatic cloud test workflow. For local simulator coverage, add `-enableCodeCoverage YES -resultBundlePath build/Testing.xcresult` to the `xcodebuild` command above; remove the previous result bundle before reusing that path.
 
 For a hands-on device check: create two notes, write and erase ink, undo/redo, zoom and scroll, switch notes, then background and relaunch. Confirm that the ink, typed text, and viewport survive.
 
@@ -163,7 +179,8 @@ For a hands-on device check: create two notes, write and erase ink, undo/redo, z
 | File | Responsibility |
 | --- | --- |
 | `ScribbleScout/ScribbleScoutApp.swift` | App entry point and lifecycle save |
-| `ScribbleScout/Notebook.swift` | Note records, local snapshots, autosave sessions, and library state |
+| `ScribbleScout/Models/NoteRecord.swift` | Foundation-only note metadata shared with the fast unit test package |
+| `ScribbleScout/Notebook.swift` | Local snapshots, autosave sessions, and library state |
 | `ScribbleScout/InkCanvas.swift` | PencilKit bridge, paper rendering, viewport, and ink controls |
 | `ScribbleScout/NotebookView.swift` | Library, search, note editor, and drawing toolbar |
 | `ScribbleScoutTests/NotebookTests.swift` | Persistence and recovery tests |
