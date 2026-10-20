@@ -490,7 +490,7 @@ private struct NoteEditor: View {
         .alert("Photo", isPresented: Binding(get: { controls.message != nil }, set: { if !$0 { controls.message = nil } })) {
             Button("OK") { controls.message = nil }
         } message: { Text(controls.message ?? "") }
-        .onDisappear { session.flush() }
+        .onDisappear { assistance.cancel(); session.flush() }
     }
 
     private func header(compact: Bool) -> some View {

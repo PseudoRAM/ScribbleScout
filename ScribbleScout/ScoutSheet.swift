@@ -60,10 +60,13 @@ struct ScoutSheet: View {
                     } footer: { Text("You can inspect and correct the transcription before asking Scout to use it.") }
                 } else {
                     Section {
-                        TextField("Recognised text or question", text: $coordinator.transcript, axis: .vertical)
+                        TextField("Recognised text or question", text: Binding(get: { coordinator.transcript }, set: {
+                            guard coordinator.transcript != $0 else { return }
+                            coordinator.transcript = $0
+                            coordinator.transcriptEdited()
+                        }), axis: .vertical)
                             .lineLimit(3...10).disabled(coordinator.busy)
                             .accessibilityIdentifier("scoutQuestion")
-                            .onChange(of: coordinator.transcript) { _, _ in coordinator.transcriptEdited() }
                         if let uncertainties = coordinator.region?.uncertainty, !uncertainties.isEmpty {
                             Label(uncertainties.joined(separator: "\n"), systemImage: "exclamationmark.triangle")
                                 .font(.callout).foregroundStyle(.secondary)
@@ -86,10 +89,13 @@ struct ScoutSheet: View {
                     Section("Next step · \(decision.route.title)") {
                         if decision.route == .webResearch {
                             Text("Write a public research question. Remove names, private decisions and confidential details. Only the question below is sent for web research.")
-                            TextField("Public research question", text: $coordinator.publicQuestion, axis: .vertical)
+                            TextField("Public research question", text: Binding(get: { coordinator.publicQuestion }, set: {
+                                guard coordinator.publicQuestion != $0 else { return }
+                                coordinator.publicQuestion = $0
+                                coordinator.publicQuestionEdited()
+                            }), axis: .vertical)
                                 .lineLimit(2...6).disabled(coordinator.busy)
                                 .accessibilityIdentifier("publicResearchQuestion")
-                                .onChange(of: coordinator.publicQuestion) { _, _ in coordinator.publicQuestionEdited() }
                             Button("Research this public question", systemImage: "globe") { coordinator.answer(using: credentials, research: true) }
                                 .disabled(coordinator.busy || !credentials.canProcess || coordinator.publicQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                                 .frame(minHeight: 44).accessibilityIdentifier("researchPublicQuestion")
@@ -97,6 +103,9 @@ struct ScoutSheet: View {
                         } else if decision.route == .quickResponse {
                             Button("Write a quick answer", systemImage: "sparkles") { coordinator.answer(using: credentials, research: false) }
                                 .disabled(coordinator.busy || !credentials.canProcess).frame(minHeight: 44)
+                        } else if decision.route == .clarify {
+                            Text("What subject or missing detail should Scout use for this selection?")
+                            Button("Defer for now") { coordinator.dismissSuggestion(); dismiss() }.frame(minHeight: 44)
                         }
                         if decision.usedFallback { Text("Routing used Responses because Decisions was unavailable.").font(.caption).foregroundStyle(.secondary) }
                     }
@@ -107,6 +116,9 @@ struct ScoutSheet: View {
                         Text(suggestion.caveat).font(.caption).foregroundStyle(.secondary)
                         ForEach(suggestion.evidence) { evidence in
                             VStack(alignment: .leading, spacing: 8) {
+                                Label(evidence.kind == .fixture ? "Fictional source" : (evidence.kind == .web ? "Web source" : "Your notes"),
+                                      systemImage: evidence.kind == .web ? "globe" : "doc.text")
+                                    .font(.caption.weight(.semibold))
                                 if let url = evidence.url {
                                     Link(evidence.title, destination: url).frame(minHeight: 44, alignment: .leading)
                                     Text(url.host ?? "Web source").font(.caption).foregroundStyle(.secondary)

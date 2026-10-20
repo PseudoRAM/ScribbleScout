@@ -64,6 +64,7 @@ struct AssistanceRecordsTests {
                 #expect(provider.evidence.allSatisfy { $0.kind == .fixture && $0.isValid })
                 if scenario == .ambiguous { #expect(!recognition.uncertainty.isEmpty) }
                 if scenario == .conflicting { #expect(provider.evidence.count == 2) }
+                #expect(answer.isStale == (scenario == .stale))
             }
         }
         #expect(await ledger.entries.count == 10)

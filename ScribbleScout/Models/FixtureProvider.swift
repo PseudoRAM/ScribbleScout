@@ -34,6 +34,11 @@ struct FixtureProvider: AssistanceProvider {
 
     func answer(_ text: String, research: Bool, image: Data? = nil) async throws -> AssistanceAnswer {
         try await record(research ? .research : .answer)
+        if scenario == .stale {
+            return AssistanceAnswer(text: "Fictional demo: This result belongs to an earlier selection and cannot be inserted.",
+                                    citations: [], caveat: "Scripted stale-source example; select the current writing again.",
+                                    evidence: evidence, isStale: true)
+        }
         if !research && scenario != .failed {
             return AssistanceAnswer(text: "Fictional demo: A retention window sets how long records remain available before scheduled deletion. Review the window against the purpose of the records and document the agreed policy.", citations: [], caveat: "Synthetic explanation for the demo.")
         }
@@ -43,7 +48,7 @@ struct FixtureProvider: AssistanceProvider {
         case .conflicting:
             return AssistanceAnswer(text: "Fictional demo: Cedar Cloud’s public policy describes a 30-day window, while its fictional release bulletin describes 90 days. The supplied sources disagree about the applicable policy.", citations: [], caveat: "Synthetic sources conflict; confirm the applicable version.", evidence: evidence)
         case .stale:
-            return AssistanceAnswer(text: "Fictional demo: This result belongs to the earlier ink selection. It must be discarded after the source changes.", citations: [], caveat: "Source selection changed; discard this result.", evidence: evidence)
+            throw AssistanceError.invalidResponse // Handled before the quick/research branches.
         case .grounded:
             return AssistanceAnswer(text: "Fictional demo: Project Cedar Cloud’s fictional published policy describes a 30-day retention window, followed by scheduled deletion. Review the applicable policy version before making a decision about real records; this example demonstrates the research flow using synthetic sources.", citations: [], caveat: "Synthetic demo evidence, not a real company policy.", evidence: evidence)
         }

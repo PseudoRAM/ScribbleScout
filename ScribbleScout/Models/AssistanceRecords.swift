@@ -48,6 +48,8 @@ struct AssistanceRequest: Codable, Equatable, Sendable, Identifiable {
     var sourceMode: SourceMode
     var question: String
     var createdAt = Date()
+    var originalQuestion: String? = nil
+    var parentRequestID: UUID? = nil
 }
 struct Suggestion: Codable, Equatable, Sendable, Identifiable {
     var id = UUID()

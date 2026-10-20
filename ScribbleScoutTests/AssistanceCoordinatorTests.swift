@@ -50,6 +50,35 @@ struct AssistanceCoordinatorTests {
     }
 
     @Test
+    func offlineStaleScenarioCannotBeInsertedEvenWithUnchangedInk() async {
+        let settings = ScoutSession()
+        settings.scenario = .stale
+        let coordinator = AssistanceCoordinator()
+        coordinator.resolveSource = { $0 }
+        coordinator.prepare(nil, region: region())
+        coordinator.publicQuestion = "A fictional public question"
+        await idle(coordinator) { coordinator.answer(using: settings, research: true) }
+        #expect(coordinator.suggestion?.state == .stale)
+        #expect(coordinator.suggestion?.isFixture == true)
+        #expect(!coordinator.canInsert)
+    }
+
+    @Test
+    func followUpRetainsOriginalQuestionAndParentRequest() async throws {
+        let settings = ScoutSession()
+        let coordinator = AssistanceCoordinator()
+        coordinator.resolveSource = { $0 }
+        coordinator.prepare(nil, region: region("Explain a retention window"))
+        await idle(coordinator) { coordinator.answer(using: settings, research: false) }
+        let original = try #require(coordinator.suggestion?.request)
+        coordinator.followUp = "Explain the release review"
+        await idle(coordinator) { coordinator.answer(using: settings, research: false, followUp: true) }
+        #expect(coordinator.suggestion?.request.originalQuestion == original.question)
+        #expect(coordinator.suggestion?.request.parentRequestID == original.id)
+        #expect(coordinator.suggestion?.request.sourceMode == original.sourceMode)
+    }
+
+    @Test
     func cancelledProviderThatIgnoresCancellationCannotPublishItsAnswer() async {
         let settings = ScoutSession()
         let provider = ControlledProvider(held: [.answer])

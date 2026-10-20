@@ -56,7 +56,7 @@ final class AssistanceCoordinator: ObservableObject {
     }
 
     func recognise(using settings: ScoutSession, automatically: Bool = false) {
-        guard let selection, let region else { return }
+        guard let selection, let region, validate(region) else { return }
         automatic = automatically
         run("Reading handwriting…", settings: settings) { provider in
             let result = try await provider.recognise(image: selection.png)
@@ -79,6 +79,7 @@ final class AssistanceCoordinator: ObservableObject {
 
     func route(using settings: ScoutSession, afterCurrent: Bool = false) {
         guard let region, !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        if !afterCurrent { claimExplicit() }
         if afterCurrent { activity = nil; task = nil }
         self.region?.recognisedText = transcript
         let input = transcript
@@ -106,6 +107,7 @@ final class AssistanceCoordinator: ObservableObject {
 
     func answer(using settings: ScoutSession, research: Bool, followUp: Bool = false) {
         guard let region, validate(region) else { return }
+        claimExplicit()
         let query = research ? publicQuestion : (followUp ? self.followUp : transcript)
         guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let previous = suggestion
@@ -118,11 +120,17 @@ final class AssistanceCoordinator: ObservableObject {
             var evidence = !result.evidence.isEmpty ? result.evidence : (settings.offline ? FixtureProvider(scenario: settings.scenario).evidence : result.webEvidence())
             if followUp { evidence = self.retainedEvidence + evidence.filter { item in !self.retainedEvidence.contains(where: { $0.url == item.url && $0.title == item.title }) } }
             self.retainedEvidence = evidence
-            self.suggestion = self.makeSuggestion(answer: result.text, state: .ready, evidence: evidence, fixture: settings.offline)
+            self.suggestion = self.makeSuggestion(answer: result.text, state: result.isStale ? .stale : .ready,
+                                                 evidence: evidence, fixture: settings.offline)
             self.suggestion?.request.question = query
+            if followUp, let previous {
+                self.suggestion?.request.originalQuestion = previous.request.originalQuestion ?? previous.request.question
+                self.suggestion?.request.parentRequestID = previous.request.id
+                self.suggestion?.request.sourceMode = previous.request.sourceMode
+            }
             if !result.caveat.isEmpty { self.suggestion?.caveat = result.caveat }
             self.stage = .result
-            self.message = nil
+            self.message = result.isStale ? "Fictional stale-source example: select the current content before requesting a new answer." : nil
         }
     }
 
@@ -162,10 +170,13 @@ final class AssistanceCoordinator: ObservableObject {
     }
     func transcriptEdited() {
         guard !busy else { return }
+        claimExplicit()
         decision = nil; suggestion = nil; message = nil; retainedEvidence = []; stage = .inspect
     }
     func publicQuestionEdited() {
-        guard !busy, suggestion?.state == .ready else { return }
+        guard !busy else { return }
+        claimExplicit()
+        guard suggestion?.state == .ready else { return }
         suggestion?.state = .needsContext
         message = "The public question changed. Research it again before inserting this answer."
     }
@@ -174,6 +185,13 @@ final class AssistanceCoordinator: ObservableObject {
         generation = UUID(); task?.cancel(); pause?.cancel(); task = nil; activity = nil; queued = nil
     }
     func stopAutomatic() { pause?.cancel(); queued = nil; if automatic { cancel() } }
+
+    private func claimExplicit() {
+        automatic = false
+        pause?.cancel()
+        pause = nil
+        queued = nil
+    }
 
     func schedulePause(using settings: ScoutSession, capture: @escaping @MainActor () -> CanvasSelection?) {
         pause?.cancel()
@@ -194,6 +212,8 @@ final class AssistanceCoordinator: ObservableObject {
         }
     }
     private func startAutomatic(_ selection: CanvasSelection, settings: ScoutSession) {
+        // A queued snapshot may have changed while the previous job was finishing.
+        guard resolveSource?(selection.region) != nil else { return }
         seen.insert(selection.region.sourceHash); lastAutomatic = Date()
         prepare(selection, region: selection.region)
         recognise(using: settings, automatically: true)

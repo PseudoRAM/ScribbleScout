@@ -72,7 +72,9 @@ enum CanvasSource {
     static func region(note: NoteRecord, drawing: PKDrawing, bounds: CGRect) -> NoteRegion {
         let snapshot = Snapshot(strokes: drawing.strokes.filter { $0.renderBounds.intersects(bounds) }.map(identity),
                                 paper: paper(note, in: bounds), originalBounds: CanvasBounds(bounds))
-        let encoded = (try? JSONEncoder().encode(snapshot)) ?? Data()
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let encoded = (try? encoder.encode(snapshot)) ?? Data()
         return NoteRegion(canvasID: note.id, revision: note.drawingRevision, bounds: CanvasBounds(bounds),
                           sourceHash: encoded.base64EncodedString())
     }

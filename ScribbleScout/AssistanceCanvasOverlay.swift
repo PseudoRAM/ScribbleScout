@@ -18,6 +18,7 @@ struct AssistanceCanvasOverlay: View {
                         HStack {
                             Label(block.isFixture ? "Fictional demo · AI block" : "AI block", systemImage: "sparkles")
                                 .font(.caption.weight(.semibold))
+                                .accessibilityIdentifier("insertedAIBlock")
                             Spacer(minLength: 4)
                             Button { editing = block } label: {
                                 Image(systemName: "pencil").frame(width: 44, height: 44)
@@ -34,7 +35,6 @@ struct AssistanceCanvasOverlay: View {
                     .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
                     .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(NotebookTheme.burgundy.opacity(0.3), lineWidth: 1))
                     .offset(x: rect.minX, y: rect.minY)
-                    .accessibilityIdentifier("insertedAIBlock")
                 }
                 if let region = coordinator.region, coordinator.suggestion?.state != .dismissed,
                    coordinator.decision?.route != AssistanceRoute.none {
