@@ -115,6 +115,96 @@ struct NotebookView: View {
     }
 }
 
+/// Only the moving annotations observe the viewport; navigation leaves the editor and toolbar alone.
+private struct CanvasAnnotations: View {
+    let session: NoteSession
+    @ObservedObject var viewport: CanvasViewport
+    var onAction: (ContextAction) -> Void
+
+    var body: some View {
+        CheckoutAnnotations(session: session, onAction: onAction)
+            .scaleEffect(viewport.value.zoom, anchor: .topLeading)
+            .offset(x: -viewport.value.x, y: -viewport.value.y)
+    }
+}
+
+private struct CanvasMinimap: View {
+    let controls: CanvasControls
+    @ObservedObject var viewport: CanvasViewport
+    @ObservedObject var overview: CanvasOverview
+    @State private var collapsed = true
+    @State private var dragBounds: CGRect?
+
+    private var visibleRect: CGRect {
+        let zoom = max(0.15, viewport.value.zoom)
+        return CGRect(x: viewport.value.x / zoom, y: viewport.value.y / zoom,
+                      width: viewport.size.width / zoom, height: viewport.size.height / zoom)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if collapsed {
+                Button { collapsed = false } label: {
+                    Image(systemName: "map").frame(width: 44, height: 44)
+                }.accessibilityLabel("Show canvas minimap")
+            } else {
+                HStack(spacing: 0) {
+                    Button(action: controls.resetZoom) {
+                        Image(systemName: "house").frame(width: 44, height: 44)
+                    }.accessibilityLabel("Return to canvas start")
+                    Text("Canvas").font(.caption.weight(.semibold))
+                    Spacer(minLength: 0)
+                    Button { collapsed = true } label: {
+                        Image(systemName: "chevron.down").frame(width: 44, height: 44)
+                    }.accessibilityLabel("Hide canvas minimap")
+                }
+                GeometryReader { geometry in
+                    let map = CanvasMapGeometry(bounds: dragBounds ?? overview.snapshot.bounds, size: geometry.size)
+                    Canvas { context, _ in
+                        context.fill(Path(map.map(map.bounds)), with: .color(Color(uiColor: NotebookTheme.paper)))
+                        if let image = overview.snapshot.image {
+                            context.draw(Image(uiImage: image), in: map.map(overview.snapshot.imageBounds))
+                        }
+                        let visible = map.map(visibleRect)
+                        context.fill(Path(visible), with: .color(NotebookTheme.burgundy.opacity(0.12)))
+                        context.stroke(Path(visible), with: .color(NotebookTheme.burgundy), lineWidth: 1.5)
+                    }
+                    .contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            if dragBounds == nil { dragBounds = overview.snapshot.bounds }
+                            let fixedMap = CanvasMapGeometry(bounds: dragBounds ?? map.bounds, size: geometry.size)
+                            controls.navigate(to: fixedMap.worldPoint(value.location))
+                        }
+                        .onEnded { _ in dragBounds = nil })
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Canvas minimap")
+                    .accessibilityHint("Tap or drag to navigate. Actions move the visible area in each direction.")
+                    .accessibilityAction(named: "Move left") { move(x: -1, y: 0) }
+                    .accessibilityAction(named: "Move right") { move(x: 1, y: 0) }
+                    .accessibilityAction(named: "Move up") { move(x: 0, y: -1) }
+                    .accessibilityAction(named: "Move down") { move(x: 0, y: 1) }
+                    .accessibilityIdentifier("canvasMinimap")
+                }
+                .frame(height: 108)
+                .clipped()
+                .padding(.horizontal, 8).padding(.bottom, 8)
+            }
+        }
+        .frame(width: collapsed ? 44 : 180)
+        .buttonStyle(.plain)
+        .foregroundStyle(NotebookTheme.burgundy)
+        .background(.white.opacity(0.97), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(NotebookTheme.burgundy.opacity(0.22), lineWidth: 1))
+        .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
+    }
+
+    private func move(x: CGFloat, y: CGFloat) {
+        controls.navigate(to: CGPoint(x: visibleRect.midX + visibleRect.width * x,
+                                      y: visibleRect.midY + visibleRect.height * y))
+    }
+}
+
 private enum DrawingTool: String, CaseIterable {
     case pen = "Pen", marker = "Highlighter", eraser = "Eraser", lasso = "Lasso"
     var symbol: String {
@@ -169,12 +259,14 @@ private struct NoteEditor: View {
                 InkCanvas(session: session, controls: controls, tool: tool, fingerDrawing: fingerDrawing)
                 .overlay(alignment: .topLeading) {
                     if session.note.template == .checkout {
-                        CheckoutAnnotations(session: session) { contextAction = $0 }
-                            .scaleEffect(controls.zoom, anchor: .topLeading)
-                            .offset(x: -controls.offset.x, y: -controls.offset.y)
+                        CanvasAnnotations(session: session, viewport: controls.viewport) { contextAction = $0 }
                     }
                 }
                 .clipped()
+                .overlay(alignment: .bottomTrailing) {
+                    CanvasMinimap(controls: controls, viewport: controls.viewport, overview: controls.overview)
+                        .padding(12)
+                }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     drawingBar
                         .frame(maxWidth: 726)
@@ -261,7 +353,7 @@ private struct NoteEditor: View {
                 Text("Medium").tag(3.0)
                 Text("Bold").tag(6.0)
             }
-            Button("Fit page width", systemImage: "arrow.down.right.and.arrow.up.left", action: controls.resetZoom)
+            Button("Return to canvas start", systemImage: "house", action: controls.resetZoom)
             Button("Typed notes", systemImage: "textformat") { editingText = true }
             if session.note.attachment != nil {
                 Button("Remove photo", systemImage: "photo.badge.minus") { session.edit { $0.attachment = nil } }
@@ -424,15 +516,9 @@ private struct NoteEditor: View {
     }
 
     private func share() {
-        guard let base = controls.pageImage() else { return }
-        let renderer = UIGraphicsImageRenderer(size: base.size)
-        let image = renderer.image { _ in
-            base.draw(at: .zero)
-            if session.note.template == .checkout {
-                let annotations = ImageRenderer(content: CheckoutAnnotations(session: session) { _ in })
-                annotations.uiImage?.draw(at: .zero)
-            }
-        }
+        let annotations = session.note.template == .checkout
+            ? ImageRenderer(content: CheckoutAnnotations(session: session) { _ in }).uiImage : nil
+        guard let image = controls.pageImage(annotations: annotations) else { return }
         sharedPage = SharedPage(image: image)
     }
 }

@@ -88,7 +88,13 @@ struct LocalNotebook {
 @MainActor
 final class NoteSession: ObservableObject, Identifiable {
     let id: UUID
-    @Published private(set) var note: NoteRecord
+    @Published private var storedNote: NoteRecord
+    private var viewport: PageViewport
+    var note: NoteRecord {
+        var value = storedNote
+        value.viewport = viewport
+        return value
+    }
     private(set) var drawing: PKDrawing
     @Published private(set) var saveMessage = "Saved on this iPad"
     @Published private(set) var saveError: String?
@@ -101,19 +107,22 @@ final class NoteSession: ObservableObject, Identifiable {
 
     init(note: NoteRecord, drawing: PKDrawing, repository: LocalNotebook) {
         id = note.id
-        self.note = note
+        storedNote = note
+        viewport = note.viewport
         self.drawing = drawing
         self.repository = repository
         savedRevision = note.drawingRevision
     }
 
     func edit(_ change: (inout NoteRecord) -> Void) {
-        let previousTitle = note.title
-        let previousText = note.text
-        change(&note)
-        note.updatedAt = Date()
+        var updated = note
+        change(&updated)
+        let searchableChanged = updated.title != storedNote.title || updated.text != storedNote.text
+        updated.updatedAt = Date()
+        viewport = updated.viewport
+        storedNote = updated
         scheduleSave()
-        if note.title != previousTitle || note.text != previousText { onSearchableChange?() }
+        if searchableChanged { onSearchableChange?() }
     }
 
     func setDrawing(_ value: PKDrawing) {
@@ -122,14 +131,15 @@ final class NoteSession: ObservableObject, Identifiable {
     }
 
     func setViewport(_ value: PageViewport) {
-        guard value != note.viewport else { return }
-        note.viewport = value
-        scheduleSave()
+        guard value != viewport else { return }
+        // Navigation persists without invalidating the entire note editor each frame.
+        viewport = value
+        scheduleSave(updateStatus: false)
     }
 
-    private func scheduleSave() {
+    private func scheduleSave(updateStatus: Bool = true) {
         dirty = true
-        saveMessage = "Saving…"
+        if updateStatus && saveMessage != "Saving…" { saveMessage = "Saving…" }
         pendingSave?.cancel()
         pendingSave = Task { [weak self] in
             do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
@@ -143,7 +153,7 @@ final class NoteSession: ObservableObject, Identifiable {
         guard dirty || note.drawingFile == nil else { return true }
         do {
             // ponytail: synchronous local snapshots suit a small notebook; use a serial I/O actor for large libraries.
-            note = try repository.save(note, drawing: drawing, inkChanged: savedRevision != note.drawingRevision)
+            storedNote = try repository.save(note, drawing: drawing, inkChanged: savedRevision != note.drawingRevision)
             savedRevision = note.drawingRevision
             dirty = false
             saveError = nil

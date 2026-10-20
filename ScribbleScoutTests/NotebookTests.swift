@@ -1,5 +1,7 @@
 import Testing
 import PencilKit
+import Combine
+import SwiftUI
 @testable import ScribbleScout
 
 @Suite("Notebook persistence and editing")
@@ -224,6 +226,169 @@ struct NotebookTests {
             #expect(session.flush())
             #expect(savedNotes.count == 1)
         }
+    }
+
+    @MainActor
+    @Test
+    func testNavigationKeepsLatestViewportWithoutPublishingEditorUpdates() throws {
+        try withRepository { repository in
+            let saved = try repository.save(NoteRecord(), drawing: drawing(), inkChanged: true)
+            let session = NoteSession(note: saved, drawing: drawing(), repository: repository)
+            let controls = CanvasControls()
+            var editorUpdates = 0
+            var toolbarUpdates = 0
+            let sessionSubscription = session.objectWillChange.sink { editorUpdates += 1 }
+            let controlsSubscription = controls.objectWillChange.sink { toolbarUpdates += 1 }
+            defer { sessionSubscription.cancel(); controlsSubscription.cancel() }
+
+            for step in 1...120 {
+                let viewport = PageViewport(zoom: 1.5, x: Double(step), y: Double(step * 2))
+                session.setViewport(viewport)
+                controls.viewport.value = viewport
+                controls.refresh()
+            }
+            let latest = PageViewport(zoom: 1.5, x: 120, y: 240)
+            #expect(session.note.viewport == latest)
+            #expect(editorUpdates == 0)
+            #expect(toolbarUpdates == 0)
+
+            session.edit { $0.text = "Still editable after navigation" }
+            #expect(editorUpdates > 0)
+            #expect(session.flush())
+            let reopened = try repository.load(session.id)
+            #expect(reopened.note.viewport == latest)
+            #expect(reopened.note.text == "Still editable after navigation")
+            #expect(reopened.note.drawingFile == saved.drawingFile)
+        }
+    }
+
+    @MainActor
+    @Test
+    func testCanvasRestoresAndCoalescesViewportWhileImmediateSaveKeepsLatestPosition() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = LocalNotebook(root: root)
+        let initial = PageViewport(zoom: 1.5, x: 50, y: 100)
+        let saved = try repository.save(NoteRecord(viewport: initial), drawing: PKDrawing(), inkChanged: true)
+        let session = NoteSession(note: saved, drawing: PKDrawing(), repository: repository)
+        let controls = CanvasControls()
+        let host = UIHostingController(rootView: InkCanvas(session: session, controls: controls,
+                                                         tool: PKInkingTool(.pen), fingerDrawing: false))
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 600, height: 500)
+        window.rootViewController = host
+        window.isHidden = false
+        defer { window.isHidden = true; window.rootViewController = nil }
+        host.view.layoutIfNeeded()
+        let canvas = try #require(controls.canvas)
+        canvas.layoutIfNeeded()
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        #expect(controls.viewport.value == initial)
+
+        var overlayUpdates = 0
+        let subscription = controls.viewport.objectWillChange.sink { overlayUpdates += 1 }
+        defer { subscription.cancel() }
+        for step in 1...120 {
+            canvas.contentOffset = CGPoint(x: step, y: step * 2)
+            canvas.delegate?.scrollViewDidScroll?(canvas)
+            canvas.delegate?.scrollViewDidZoom?(canvas)
+        }
+        let latest = PageViewport(zoom: canvas.zoomScale, x: 120, y: 240)
+        #expect(session.note.viewport == latest)
+        #expect(overlayUpdates == 0)
+        // Backgrounding or changing notes may flush before the queued overlay update.
+        #expect(session.flush())
+        #expect(try repository.load(session.id).note.viewport == latest)
+
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        #expect(controls.viewport.value == latest)
+        #expect(overlayUpdates == 1)
+    }
+
+    @MainActor
+    @Test
+    func testInfiniteCanvasNavigatesEveryDirectionAndRestoresNegativeInk() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = LocalNotebook(root: root)
+        let session = NoteSession(note: NoteRecord(), drawing: PKDrawing(), repository: repository)
+        let controls = CanvasControls()
+        let host = UIHostingController(rootView: InkCanvas(session: session, controls: controls,
+                                                         tool: PKInkingTool(.pen), fingerDrawing: false))
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 600, height: 500)
+        window.rootViewController = host
+        window.isHidden = false
+        defer { window.isHidden = true; window.rootViewController = nil }
+        host.view.layoutIfNeeded()
+        let canvas = try #require(controls.canvas)
+        canvas.layoutIfNeeded()
+        let zoom = canvas.zoomScale
+        for point in [CGPoint(x: 6000, y: 5000), CGPoint(x: -6000, y: 5000),
+                      CGPoint(x: 6000, y: -5000), CGPoint(x: -6000, y: -5000)] {
+            controls.navigate(to: point)
+            let center = CGPoint(x: (canvas.contentOffset.x + canvas.bounds.width / 2) / zoom,
+                                 y: (canvas.contentOffset.y + canvas.bounds.height / 2) / zoom)
+            #expect(abs(center.x - point.x) < 1)
+            #expect(abs(center.y - point.y) < 1)
+            #expect(canvas.zoomScale == zoom)
+        }
+        controls.addRectangle(color: .red, width: 6)
+        canvas.delegate?.canvasViewDrawingDidChange?(canvas)
+        #expect(canvas.drawing.bounds.maxX < 0)
+        #expect(canvas.drawing.bounds.maxY < 0)
+        #expect(session.flush())
+        let reopened = try repository.load(session.id)
+        #expect(reopened.drawing.strokes.count == 1)
+        #expect(reopened.drawing.bounds == canvas.drawing.bounds)
+        #expect(reopened.note.viewport.x < 0 && reopened.note.viewport.y < 0)
+        let export = try #require(controls.pageImage())
+        #expect(max(export.size.width, export.size.height) <= 4096)
+
+        try await Task.sleep(for: .milliseconds(400))
+        let snapshot = UIGraphicsImageRenderer(size: host.view.bounds.size).image { _ in
+            host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+        }
+        let pixels = try #require(snapshot.cgImage?.dataProvider?.data)
+        let bytes = try #require(CFDataGetBytePtr(pixels))
+        let redPixels = stride(from: 0, to: CFDataGetLength(pixels) - 4, by: 4).filter {
+            bytes[$0 + 1] < 100 && ((bytes[$0] > 180 && bytes[$0 + 2] < 100) || (bytes[$0 + 2] > 180 && bytes[$0] < 100))
+        }.count
+        #expect(redPixels > 100, "PencilKit must visibly render ink at negative coordinates")
+        let preview = try #require(controls.overview.snapshot.image)
+        #expect(max(preview.size.width, preview.size.height) <= 256)
+
+        let restored = NoteSession(note: reopened.note, drawing: reopened.drawing, repository: repository)
+        let restoredControls = CanvasControls()
+        let restoredHost = UIHostingController(rootView: InkCanvas(session: restored, controls: restoredControls,
+                                                                 tool: PKInkingTool(.pen), fingerDrawing: false))
+        window.rootViewController = restoredHost
+        restoredHost.view.layoutIfNeeded()
+        restoredControls.canvas?.layoutIfNeeded()
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        #expect(restoredControls.viewport.value == reopened.note.viewport)
+        #expect(restoredControls.canvas?.drawing.bounds == reopened.drawing.bounds)
+    }
+
+    @Test
+    func testMinimapCoordinatesRoundTripWithNegativeBounds() {
+        let map = CanvasMapGeometry(bounds: CGRect(x: -6000, y: -5000, width: 16000, height: 12000),
+                                    size: CGSize(width: 180, height: 108))
+        let viewport = CGRect(x: -2000, y: 3000, width: 900, height: 700)
+        let mapped = map.map(viewport)
+        let center = map.worldPoint(CGPoint(x: mapped.midX, y: mapped.midY))
+        #expect(abs(center.x - viewport.midX) < 0.001)
+        #expect(abs(center.y - viewport.midY) < 0.001)
+        #expect(map.map(map.bounds).minX >= 0)
+        #expect(map.map(map.bounds).maxX <= map.size.width)
     }
 
     @MainActor
