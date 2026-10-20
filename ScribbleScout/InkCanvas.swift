@@ -439,6 +439,11 @@ private final class NotebookCanvasView: PKCanvasView {
         return (paper.note.blocks ?? []).reduce(content) { $0.union($1.bounds.cgRect.insetBy(dx: -32, dy: -32)) }
     }
 
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil { becomeFirstResponder() }
+    }
+
     func expand(toInclude rect: CGRect) {
         guard !updatingExtent, rect.minX.isFinite, rect.minY.isFinite,
               rect.width.isFinite, rect.height.isFinite else { return }
@@ -649,6 +654,10 @@ struct InkCanvas: UIViewRepresentable {
         init(session: NoteSession, controls: CanvasControls) { self.session = session; self.controls = controls }
 
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
+            // Keep an emptied canvas ready for the next Pencil stroke, including after undo.
+            if canvasView.window != nil && canvasView.drawing.strokes.isEmpty {
+                canvasView.becomeFirstResponder()
+            }
             controls.selection = nil
             controls.recordChanges(from: session.drawing, to: canvasView.drawing)
             session.setDrawing(canvasView.drawing)

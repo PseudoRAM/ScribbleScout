@@ -6,6 +6,34 @@ import SwiftUI
 
 @Suite("Notebook persistence and editing", .serialized)
 struct NotebookTests {
+    @MainActor
+    @Test
+    func testPencilCanvasIsActiveOnOpeningAndAfterClearing() throws {
+        try withRepository { repository in
+            let session = NoteSession(note: NoteRecord(), drawing: PKDrawing(), repository: repository)
+            let controls = CanvasControls()
+            let host = UIHostingController(rootView: InkCanvas(session: session, controls: controls,
+                tool: PKInkingTool(.pen, color: .black, width: 3), fingerDrawing: false))
+            let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 768, height: 1024)
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer { window.isHidden = true; window.rootViewController = nil }
+            host.view.layoutIfNeeded()
+            let canvas = try #require(controls.canvas)
+            #expect(canvas.drawingPolicy == .pencilOnly)
+            #expect(canvas.isDrawingEnabled)
+            #expect(canvas.isFirstResponder, "The startup canvas must own Pencil input")
+            canvas.drawing = drawing()
+            canvas.delegate?.canvasViewDrawingDidChange?(canvas)
+            canvas.resignFirstResponder()
+            canvas.drawing = PKDrawing()
+            canvas.delegate?.canvasViewDrawingDidChange?(canvas)
+            #expect(canvas.isFirstResponder, "Clearing ink must leave Pencil input active")
+        }
+    }
+
     @Test
     func testOnDeviceSearchPersistsAndRebuildsItsDisposableCache() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
