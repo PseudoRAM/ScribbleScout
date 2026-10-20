@@ -55,11 +55,16 @@ final class AssistanceCoordinator: ObservableObject {
         stage = selection == nil ? .inspect : .compose
     }
 
+    func ask(_ selection: CanvasSelection, using settings: ScoutSession) {
+        prepare(selection, region: selection.region)
+        recognise(using: settings)
+    }
+
     func recognise(using settings: ScoutSession, automatically: Bool = false) {
         guard let selection, let region, validate(region) else { return }
         automatic = automatically
         run("Reading handwriting…", settings: settings) { provider in
-            let result = try await provider.recognise(image: selection.png)
+            let result = try await provider.recognise(image: selection.png, context: selection.contextPNG)
             try Task.checkCancellation()
             guard self.validate(region) else { return }
             self.transcript = result.text
@@ -84,7 +89,7 @@ final class AssistanceCoordinator: ObservableObject {
         self.region?.recognisedText = transcript
         let input = transcript
         run("Checking how to help…", settings: settings) { provider in
-            let result = try await provider.route(input)
+            let result = try await provider.route(input, image: self.selection?.contextPNG)
             try Task.checkCancellation()
             guard self.validate(region) else { return }
             self.decision = result
@@ -114,7 +119,7 @@ final class AssistanceCoordinator: ObservableObject {
         let references = retainedEvidence.map { "\($0.title): \($0.excerpt)" }.joined(separator: "\n")
         let input = followUp && !research ? "Question: \(query)\nPrevious answer: \(previous?.answer ?? "")\nExisting evidence (do not invent new citations):\n\(references)" : query
         run(research ? "Researching the public question…" : "Writing a quick answer…", settings: settings) { provider in
-            let result = try await provider.answer(input, research: research)
+            let result = try await provider.answer(input, research: research, image: research ? nil : self.selection?.contextPNG)
             try Task.checkCancellation()
             guard self.validate(region) else { return }
             var evidence = !result.evidence.isEmpty ? result.evidence : (settings.offline ? FixtureProvider(scenario: settings.scenario).evidence : result.webEvidence())

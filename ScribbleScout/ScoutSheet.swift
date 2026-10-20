@@ -49,7 +49,9 @@ struct ScoutSheet: View {
                     Section("Source selection") {
                         Image(uiImage: selection.image).resizable().scaledToFit().frame(maxHeight: 220)
                             .accessibilityLabel("Selected handwriting to recognise")
-                        Text("Only this selected area is sent for recognition. Nearby notebook content is excluded.").font(.caption).foregroundStyle(.secondary)
+                        Image(uiImage: selection.contextImage).resizable().scaledToFit().frame(maxHeight: 180)
+                            .accessibilityLabel("Whole canvas context sent to Scout")
+                        Text("Scout reads the selected handwriting and uses this whole-canvas snapshot as context, including offscreen content. Large canvases are scaled down.").font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 if coordinator.stage == .compose {
@@ -170,6 +172,11 @@ struct ScoutSheet: View {
             }
             .sheet(isPresented: $settings) { ScoutSettingsSheet(credentials: credentials, coordinator: coordinator) }
             .task { await coordinator.refreshUsage(credentials) }
+            .onChange(of: credentials.canProcess) { _, allowed in
+                if allowed && coordinator.selection != nil && coordinator.stage == .compose && !coordinator.busy {
+                    coordinator.recognise(using: credentials)
+                }
+            }
         }
     }
     private var browserURL: URL? {
@@ -192,7 +199,7 @@ struct ScoutSettingsSheet: View {
                     Picker("Mode", selection: $credentials.mode) {
                         ForEach(ScoutSession.Mode.allCases) { Text($0.rawValue).tag($0) }
                     }.accessibilityIdentifier("modePicker")
-                    Text("Explicit only waits for Ask AI. Automatic reads a bounded changed region after a 1.8 second pause, with a 20 second cooldown. It leaves a quiet pin and never opens this inspector or starts web research. Review transcription and a public question before researching.").font(.caption).foregroundStyle(.secondary)
+                    Text("Explicit only waits for Ask AI. Automatic reads a bounded changed region with whole-canvas context after a 1.8 second pause, with a 20 second cooldown. It leaves a quiet pin and never opens this inspector or starts web research. Review transcription and a public question before researching.").font(.caption).foregroundStyle(.secondary)
                     Toggle("Fictional offline demo", isOn: $credentials.offline).disabled(coordinator.busy).accessibilityIdentifier("providerMode")
                     if credentials.offline {
                         Picker("Demo scenario", selection: $credentials.scenario) {
@@ -213,7 +220,7 @@ struct ScoutSettingsSheet: View {
                         }
                         Toggle("Allow OpenAI processing", isOn: $credentials.consent)
                     } header: { Text("Personal prototype · OpenAI") } footer: {
-                        Text("Recognition sends the selected canvas image to OpenAI. Routing and quick answers send the corrected text. Web research sends only your separately reviewed public question. Automatic mode may recognise and route changed handwriting after a pause. Your key stays in memory until forgotten or the app closes. Responses use store=false; this does not mean zero retention. API use is billed to your OpenAI project.")
+                        Text("Recognition sends the selected handwriting and a whole-canvas snapshot to OpenAI. Routing and quick answers use that snapshot with the corrected text. Web research sends only your separately reviewed public question. Automatic mode may recognise and route changed handwriting after a pause. Your key stays in memory until forgotten or the app closes. Responses use store=false; this does not mean zero retention. API use is billed to your OpenAI project.")
                     }
                 }
                 Section("Session usage · live requests") {

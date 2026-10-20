@@ -31,6 +31,24 @@ struct AssistanceCoordinatorTests {
     }
 
     @Test
+    func askSelectionStartsRecognitionWithCanvasContextWithoutAnotherTap() async {
+        let settings = ScoutSession()
+        let coordinator = AssistanceCoordinator()
+        let provider = ControlledProvider(held: [.recognition])
+        coordinator.resolveSource = { $0 }
+        coordinator.providerFactory = { _ in provider }
+        let source = region()
+        let selected = selection(source)
+        coordinator.ask(selected, using: settings)
+        await provider.waitForCalls(1)
+        await idle(coordinator) { Task { await provider.release(.recognition) } }
+        #expect(await provider.callCount == 1)
+        #expect(await provider.recognitionContext == selected.contextPNG)
+        #expect(coordinator.stage == .inspect)
+        #expect(!coordinator.transcript.isEmpty)
+    }
+
+    @Test
     func sourceEditedDuringAnswerCannotBeAccepted() async throws {
         let settings = ScoutSession()
         let provider = ControlledProvider(held: [.answer])
@@ -271,6 +289,11 @@ private actor ControlledProvider: AssistanceProvider {
     func release(_ operation: Operation) {
         held.remove(operation)
         pending.removeValue(forKey: operation)?.resume()
+    }
+    private(set) var recognitionContext: Data?
+    func recognise(image: Data, context: Data?) async throws -> RecognitionResult {
+        recognitionContext = context
+        return try await recognise(image: image)
     }
     func recognise(image: Data) async throws -> RecognitionResult {
         await begin(.recognition)

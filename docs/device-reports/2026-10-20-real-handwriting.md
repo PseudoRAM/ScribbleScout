@@ -55,6 +55,14 @@ For an observed failure record sample/attempt, exact action sequence, expected/a
 
 ## Completion gate
 
+### Follow-up build · lasso Ask Scout starts recognition
+
+Ben clarified the expected interaction: lasso → Ask Scout should immediately recognise the selected handwriting, using all canvas content as context. Implemented the action to start recognition directly, with separate selected-crop and whole-occupied-canvas images. The canvas snapshot includes offscreen ink, paper content and AI block text; both previews appear in the inspector. Image resolution remains capped at 1,600 pixels per longest edge, so large-canvas context may lose detail. The snapshot is taken at selection time. Routing and quick answers receive the context snapshot; public research continues to exclude canvas images.
+
+Validation: 28 Foundation tests and 42 iOS coordinator/persistence/canvas tests passed. Regressions cover automatic recognition from the selection action, context forwarding, separate selected/context image payloads and whole-page context bounds. These are implementation checks, not real handwriting accuracy evidence.
+
+Updated development build installed successfully on the paired iPad. Executable SHA-256: `fb6fa8e97bc8f16cf2b1abe710f99013df66b8bc154d4a97d4cb1e6db11549d0`. This follow-up was built from the shared working checkout, including concurrent uncommitted work; it is not the earlier clean-main binary. Ben's retest and live handwriting results remain pending. Relaunch resets session settings: disable Fictional offline demo and enable Allow OpenAI processing for live recognition.
+
 - [x] Build/install/launch current merged main on paired iPad mini.
 - [x] Ben available for actual handwriting interaction.
 - [ ] Confirm live provider, model and processing consent during samples.

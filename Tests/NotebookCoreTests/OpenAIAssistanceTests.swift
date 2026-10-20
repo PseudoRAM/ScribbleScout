@@ -97,6 +97,17 @@ struct OpenAIAssistanceTests {
         }
     }
 
+    @Test func recognitionSeparatesSelectedInkFromWholeCanvasContext() throws {
+        let body = OpenAIAssistance.recognitionBody(Data([1]), context: Data([2]))
+        let input = try #require(body["input"] as? [[String: Any]])
+        let content = try #require(input.first?["content"] as? [[String: Any]])
+        #expect(content.count == 3)
+        #expect(content[1]["image_url"] as? String == "data:image/png;base64,AQ==")
+        #expect(content[2]["image_url"] as? String == "data:image/png;base64,Ag==")
+        #expect((content[0]["text"] as? String)?.contains("do not transcribe unselected text") == true)
+        #expect(body["tools"] == nil)
+    }
+
     @Test func ledgerRecordsReportedUsageFallbackAndFailureWithoutEstimatingTokens() async throws {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [StubOpenAI.self]

@@ -78,10 +78,12 @@ struct RecognitionResult: Codable, Equatable, Sendable {
 }
 protocol AssistanceProvider: Sendable {
     func recognise(image: Data) async throws -> RecognitionResult
+    func recognise(image: Data, context: Data?) async throws -> RecognitionResult
     func route(_ text: String, image: Data?) async throws -> RoutingDecision
     func answer(_ text: String, research: Bool, image: Data?) async throws -> AssistanceAnswer
 }
 extension AssistanceProvider {
+    func recognise(image: Data, context: Data?) async throws -> RecognitionResult { try await recognise(image: image) }
     func route(_ text: String) async throws -> RoutingDecision { try await route(text, image: nil) }
     func answer(_ text: String, research: Bool) async throws -> AssistanceAnswer { try await answer(text, research: research, image: nil) }
 }

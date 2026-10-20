@@ -205,6 +205,12 @@ final class CanvasControls: ObservableObject {
                 canvas.paper.draw(canvas.paper.bounds)
                 canvas.drawing.image(from: region, scale: scale).draw(in: region)
                 if !mask {
+                    for block in canvas.paper.note.blocks ?? [] {
+                        let text = "AI block\n" + block.body + "\n" + block.caveat
+                        (text as NSString).draw(in: block.bounds.cgRect.insetBy(dx: 14, dy: 14), withAttributes: [
+                            .font: UIFont.systemFont(ofSize: 16), .foregroundColor: UIColor(NotebookTheme.ink)
+                        ])
+                    }
                     UIColor(NotebookTheme.burgundy).setStroke()
                     path.lineWidth = 3 / scale
                     path.stroke()
@@ -212,8 +218,8 @@ final class CanvasControls: ObservableObject {
             }
         }
         let image = render(rect, mask: true)
-        // Nearby context is bounded to 300 page points around the selection, with the focus outlined.
-        let contextBounds = rect.insetBy(dx: -300, dy: -300)
+        // Capture all occupied canvas content, including offscreen ink; bound image resolution, not its extent.
+        let contextBounds = canvas.occupiedRect.union(rect)
         let contextImage = render(contextBounds, mask: false)
         guard let png = image.pngData(), let contextPNG = contextImage.pngData() else { return }
         selection = CanvasSelection(image: image, png: png, contextImage: contextImage, contextPNG: contextPNG,

@@ -338,7 +338,7 @@ private struct LassoAssistanceOverlay: View {
                 }
                 .stroke(NotebookTheme.burgundy, style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
                 .allowsHitTesting(false)
-                Button("Ask AI", systemImage: "sparkles") { ask(selection) }
+                Button("Ask Scout", systemImage: "sparkles") { ask(selection) }
                     .font(.body.weight(.semibold)).buttonStyle(.borderedProminent)
                     .frame(minHeight: 44)
                     .offset(x: max(12, min(x, geometry.size.width - 150)),
@@ -413,7 +413,7 @@ private struct NoteEditor: View {
                 .overlay {
                     if assistance.region?.id != controls.selection?.region.id || assistance.region == nil {
                         LassoAssistanceOverlay(controls: controls, viewport: controls.viewport) { selection in
-                            assistance.prepare(selection, region: selection.region)
+                            assistance.ask(selection, using: scout)
                             showingScout = true
                         }
                     }
