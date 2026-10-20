@@ -1,0 +1,42 @@
+{
+  "scope": "Synthetic single run; final pin and actionable usefulness are code-derived proxies, not observed user ratings",
+  "n": 12,
+  "errors": 0,
+  "normalizedExactTranscripts": 12,
+  "correctRoutes": 9,
+  "finalPinProxyCount": 8,
+  "unwantedFinalPinProxy": {
+    "count": 4,
+    "quietSamples": 6
+  },
+  "missedUsefulFinalPinProxy": {
+    "count": 3,
+    "usefulSamples": 6
+  },
+  "correctActionablePinProxy": {
+    "count": 3,
+    "allFinalPins": 8
+  },
+  "latencySeconds": {
+    "recognitionSeconds": {
+      "n": 12,
+      "median": 1.747556984424591,
+      "max": 3.2080860137939453
+    },
+    "routingSeconds": {
+      "n": 12,
+      "median": 0.09235244989395142,
+      "max": 0.26117396354675293
+    },
+    "pipelineSeconds": {
+      "n": 12,
+      "median": 1.8646644949913025,
+      "max": 3.279592990875244
+    },
+    "estimatedPauseToReviewSeconds": {
+      "n": 12,
+      "median": 3.66466646194458,
+      "max": 5.07959394454956
+    }
+  }
+}

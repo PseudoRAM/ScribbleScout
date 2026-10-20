@@ -574,6 +574,15 @@ struct NotebookTests {
                                                CGPoint(x: -3000, y: -1000), CGPoint(x: -8000, y: -1000)])
             let large = try #require(controls.selection)
             #expect(max(large.image.size.width, large.image.size.height) <= 1600)
+            let background = controls.captureSelection(outline: selected.outline, publish: false)
+            #expect(background != nil)
+            #expect(controls.selection?.id == large.id, "Background capture must preserve the user’s lasso selection")
+            canvas.drawing = originalInk.transformed(using: CGAffineTransform(translationX: 300, y: 300))
+            canvas.delegate?.canvasViewDrawingDidChange?(canvas)
+            #expect(controls.selection == nil)
+            #expect(controls.captureChangedRegion() != nil)
+            #expect(controls.selection == nil, "Automatic captures must not reveal an unsolicited Ask Scout lasso")
+            #expect(controls.captureChangedRegion() == nil, "A changed region is captured once per pause")
         }
     }
 

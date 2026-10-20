@@ -95,7 +95,8 @@ struct AssistanceCoordinatorTests {
         coordinator.recallSearch = { query in
             searched = query
             phase = coordinator.workPhase
-            return [Evidence(kind: .note, title: "Last meeting", excerpt: "Validate trials first.")]
+            return [Evidence(kind: .note, title: "Last meeting", excerpt: "Validate trials first.",
+                             canvasID: UUID(), bounds: CanvasBounds(x: 0, y: 0, width: 100, height: 100))]
         }
         coordinator.schedulePause(using: settings) { selection(region()) }
         await provider.waitForCalls(2)
@@ -127,6 +128,52 @@ struct AssistanceCoordinatorTests {
         await idle(coordinator) { Task { await provider.release(.answer) } }
         #expect(coordinator.suggestion?.state == .stale)
         #expect(!coordinator.canInsert)
+    }
+
+    @Test(arguments: [AssistanceRoute.none, .clarify])
+    func automaticDecisionWithholdsResponseWithoutAnAction(route: AssistanceRoute) async {
+        let settings = fixtureSettings()
+        settings.mode = .automatic
+        let provider = ControlledProvider(held: [.route], route: route, recognitionText: "Notes about the next meeting")
+        let coordinator = AssistanceCoordinator()
+        coordinator.pauseDelay = .zero
+        coordinator.providerFactory = { _ in provider }
+        coordinator.resolveSource = { $0 }
+        coordinator.schedulePause(using: settings) { selection(region()) }
+        await provider.waitForCalls(2)
+        #expect(!coordinator.showsCanvasResponse, "Reading and Decisions must not open a response card")
+        await idle(coordinator) { Task { await provider.release(.route) } }
+        #expect(!coordinator.showsCanvasResponse)
+        #expect(await provider.callCount == 2, "No answer or research request for ordinary or incomplete notes")
+        #expect(!coordinator.canInsert)
+        if route == .clarify {
+            #expect(coordinator.region != nil, "Clarification remains available through Review")
+            #expect(coordinator.message != nil)
+        }
+    }
+
+    @Test
+    func explicitClarificationRemainsVisibleAndAutomaticAnswerCanBeInserted() async {
+        let settings = fixtureSettings()
+        let coordinator = AssistanceCoordinator()
+        coordinator.resolveSource = { $0 }
+        coordinator.providerFactory = { _ in ControlledProvider(route: .clarify) }
+        coordinator.prepare(nil, region: region("Explain…"))
+        await idle(coordinator) { coordinator.route(using: settings) }
+        #expect(coordinator.showsCanvasResponse)
+        coordinator.dismissSuggestion()
+
+        settings.mode = .automatic
+        let provider = ControlledProvider(held: [.answer], recognitionText: "Explain a database index")
+        coordinator.providerFactory = { _ in provider }
+        coordinator.pauseDelay = .zero
+        coordinator.schedulePause(using: settings) { selection(region()) }
+        await provider.waitForCalls(3)
+        #expect(coordinator.showsCanvasResponse, "An actionable decision may show streaming text")
+        #expect(!coordinator.canInsert, "Partial text cannot be accepted")
+        await idle(coordinator) { Task { await provider.release(.answer) } }
+        #expect(coordinator.showsCanvasResponse)
+        #expect(coordinator.canInsert)
     }
 
     private func region(_ text: String = "Explain this decision") -> NoteRegion {

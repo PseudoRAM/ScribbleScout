@@ -40,6 +40,9 @@ struct FixtureProvider: AssistanceProvider {
                                     evidence: evidence, isStale: true)
         }
         if !research && scenario != .failed {
+            if text.lowercased().contains("database index") {
+                return AssistanceAnswer(text: "Fictional demo: A database index keeps selected column values in a structure that helps the database find matching rows without scanning the entire table. It can speed up reads, but takes storage and must be updated when rows change. Choose indexes around the queries you actually run, and check the query plan before assuming an index will help.", citations: [], caveat: "Synthetic explanation for the demo.")
+            }
             return AssistanceAnswer(text: "Fictional demo: A retention window sets how long records remain available before scheduled deletion. Review the window against the purpose of the records and document the agreed policy.", citations: [], caveat: "Synthetic explanation for the demo.")
         }
         switch scenario {

@@ -1,0 +1,22 @@
+Test Suite 'ScribbleScoutTests.xctest' passed at 2026-10-20 13:52:40.267.
+Test Suite 'Selected tests' passed at 2026-10-20 13:52:40.267.
+✔ Test sourceEditedDuringAnswerCannotBeAccepted() passed after 0.001 seconds.
+✔ Test offlineStaleScenarioCannotBeInsertedEvenWithUnchangedInk() passed after 0.001 seconds.
+✔ Test followUpRetainsOriginalQuestionAndParentRequest() passed after 0.012 seconds.
+✔ Test cancelledProviderThatIgnoresCancellationCannotPublishItsAnswer() passed after 0.001 seconds.
+✔ Test explicitDraftPreemptsAutomaticRecognitionEvenWhenOldProviderFinishes() passed after 0.002 seconds.
+✔ Test automaticWorkKeepsOnlyLatestQueuedRegion() passed after 0.001 seconds.
+✔ Test dismissedEquivalentTopicIsSuppressedAcrossChangedSourceHashes() passed after 0.001 seconds.
+✔ Test explicitAnswerOwnsAutomaticResultAndPreventsLaterPauseFromReplacingIt() passed after 0.001 seconds.
+✔ Test queuedSourceInvalidatedBeforeDrainIsNeverUploadedForRecognition() passed after 0.001 seconds.
+​✔ Test nonAutomaticModesDoNotCaptureOrUpload(mode:) with 2 test cases passed after 0.004 seconds.
+✔ Test defaultCooldownDropsNewPauseAndExplicitRequestStillRuns() passed after 0.001 seconds.
+✔ Test mutedTopicRecognisesButDoesNotRouteAgain() passed after 0.001 seconds.
+✔ Test automaticResearchRouteWaitsForSeparatelyReviewedPublicQuestion() passed after 0.001 seconds.
+✔ Test ordinaryWritingShowsBusyPinBeforeSilentRouteCompletes() passed after 0.001 seconds.
+✘ Test nonAssistanceAndPrivateRecallLeaveNoCanvasSuggestion(route:) recorded an issue with 1 argument route → .recall at AssistanceCoordinatorTests.swift:351:9: Expectation failed: (coordinator.region → NoteRegion(id: EA8D2464-1E51-4579-8DEA-9A66533FF395, canvasID: 765FE16B-E700-452B-9C32-7EFCFB49ACEF, revision: 1, bounds: ScribbleScout.CanvasBounds(x: 20.0, y: 30.0, width: 200.0, height: 100.0), recognisedText: "Explain this decision", uncertainty: [], sourceHash: "898E1A44-B8CB-4F75-8DA6-5398E265D127")) == nil
+✘ Test nonAssistanceAndPrivateRecallLeaveNoCanvasSuggestion(route:) recorded an issue with 1 argument route → .recall at AssistanceCoordinatorTests.swift:352:9: Expectation failed: (coordinator.suggestion → Suggestion(id: 92F315B7-E0B4-4604-A320-396F83EA8747, request: ScribbleScout.AssistanceRequest(id: 86522759-9788-4425-8C8A-0D0B1CD8C2E0, region: ScribbleScout.NoteRegion(id: EA8D2464-1E51-4579-8DEA-9A66533FF395, canvasID: 765FE16B-E700-452B-9C32-7EFCFB49ACEF, revision: 1, bounds: ScribbleScout.CanvasBounds(x: 20.0, y: 30.0, width: 200.0, height: 100.0), recognisedText: "Explain this decision", uncertainty: [], sourceHash: "898E1A44-B8CB-4F75-8DA6-5398E265D127"), intent: ScribbleScout.AssistanceRoute.recall, sourceMode: ScribbleScout.SourceMode.web, question: "Explain this decision", createdAt: 2026-10-20 02:52:40 +0000, originalQuestion: nil, parentRequestID: nil), answer: "", caveat: "Fictional offline demo. This is not verified research.", evidence: [], state: ScribbleScout.SuggestionState.needsContext, createdAt: 2026-10-20 02:52:40 +0000, isFixture: true)) == nil
+​✘ Test nonAssistanceAndPrivateRecallLeaveNoCanvasSuggestion(route:) with 2 test cases failed after 0.029 seconds with 2 issues.
+✘ Suite "Assistance coordination" failed after 0.063 seconds with 2 issues.
+✘ Test run with 15 tests in 1 suite failed after 0.063 seconds with 2 issues.
+** TEST FAILED **

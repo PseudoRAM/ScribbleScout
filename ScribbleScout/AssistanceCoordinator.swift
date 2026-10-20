@@ -52,6 +52,13 @@ final class AssistanceCoordinator: ObservableObject {
     }
     var busy: Bool { activity != nil }
     var canInsert: Bool { suggestion?.state == .ready && suggestion?.hasValidEvidence == true && !busy }
+    /// Automatic review/clarification stays in the status control until the user asks to inspect it.
+    var showsCanvasResponse: Bool {
+        guard region != nil else { return false }
+        if let workPhase { return workPhase.isAction }
+        if automatic { return suggestion?.state == .ready && suggestion?.answer.isEmpty == false }
+        return true
+    }
     var pinTitle: String {
         if let activity { return activity }
         switch suggestion?.state {

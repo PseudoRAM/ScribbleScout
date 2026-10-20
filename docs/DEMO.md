@@ -1,6 +1,6 @@
 # Scribble Scout demo
 
-The demonstration is a native iPad notebook, not a meeting recorder. Original ink stays local. Live recognition sends the selected crop and a whole-canvas context snapshot to OpenAI. Only the selected text is transcribed. Public research uses a separate question that the user reviews before sending.
+The demonstration is a native iPad notebook, not a meeting recorder. Original ink stays local. Live recognition sends the selected crop and a whole-canvas context snapshot to OpenAI. Only the selected text is transcribed. Explicit public research uses a separate question that the user reviews before sending. Automatic mode can research the recognised selected text directly.
 
 ## Prepare
 
@@ -17,8 +17,8 @@ The demonstration is a native iPad notebook, not a meeting recorder. Original in
 | 0:00–0:20 | Write a specific technical question with Apple Pencil, then add another note. | Ink remains the primary interaction. |
 | 0:20–0:45 | Lasso the question and tap Ask Scout; recognition starts immediately. Inspect the crop, whole-canvas context and transcript, then correct the text if needed. | The user can catch extraction mistakes before research. |
 | 0:45–1:10 | Review a minimal public question with names and private context removed. Start research, close the inspector and continue writing. | Research stays asynchronous; public query review is separate from private context. |
-| 1:10–1:30 | Tap the ready pin. Read the finding and limitation; open a real supporting source. | Returned citations are inspectable. A URL alone does not prove a claim. |
-| 1:30–1:50 | Insert a labelled AI block in free space; edit it, undo acceptance, then redo. | Generated text is separate from ink and retains its sources. |
+| 1:10–1:30 | Scroll the canvas response to its final caveat, then tap Review. Read the finding and limitation; open a real supporting source. | Returned citations are inspectable. A URL alone does not prove a claim. |
+| 1:30–1:50 | Use Insert on the canvas card, or choose placement in Review. Edit the labelled AI block, undo acceptance, then redo. | Generated text is separate from ink and retains its sources. |
 | 1:50–2:00 | Reopen the note and show the block. Briefly demonstrate an ambiguous question or stale result. | Persistence and a visible trust boundary, not just an API response. |
 
 Do not claim the flow is live when using offline examples. Say which provider ran, what was corrected and what remains uncertain. Recall is optional; omit it if it distracts from the essential loop.
@@ -29,6 +29,9 @@ Run these before recording the live demonstration. Keep the result bundle and re
 
 - Clear handwriting, technical acronym, negation, incomplete phrase, erasure and a small mixed diagram. Record transcription errors rather than silently fixing them in the reported result.
 - Edit or delete the source while research is running. The obsolete result must not attach to new writing. Move an intact source and check its pin resolves to the new position.
+- Tap Scout’s status and check the explanation and Off / Explicit only / Automatic controls. Scout watches handwriting and does not record audio.
+- Write an ordinary note or incomplete phrase: Decisions must not open an automatic response card. A useful question may show an answer; clarification remains available through Review.
+- At the largest text size, scroll to the final caveat in portrait and landscape, then insert from the card. Undo must remove the inserted block in one step.
 - Request the same source twice, dismiss it and enable automatic assistance. Check duplicates and muted topics remain suppressed.
 - Cancel a pending request, then explicitly retry. Cancellation ends local waiting; remote processing and billing may continue.
 - Try an invalid key, offline network and rate-limited response. Drawing, local saves and existing notes must remain usable.
@@ -52,7 +55,7 @@ Record organiser slot/submission requirements separately. Neither a simulator vi
 
 BIL-5–17 cover the essential demo, with BIL-18 providing the bounded pause enhancement and BIL-19 selected explanations/follow-ups. BIL-20–22 dated local Recall is implemented as optional demo scope. Hosted services, accounts, study telemetry, sync and request-circle gestures are not needed for this demonstration.
 
-## Verification · 20 October 2026
+## Earlier implementation verification · 20 October 2026
 
 - 26 Foundation-only tests pass in Debug and Release, including transcription parsing, safe source modes, structured synthesis/source IDs, usage accounting, cancellation, rate limits and timeout behavior.
 - 32 iOS persistence/coordinator tests pass, including block recovery and undo/redo, source moves and repeated validation, stale queued captures, explicit priority, cancellation, dismissal suppression, follow-up references and offline stale examples.
@@ -74,3 +77,17 @@ Three fictional canvases install once, without replacing existing notes: checkou
 4. To compare with public evidence, enter a separate public question, for example “What payment flows support annual subscriptions?”, then choose **Add public web evidence**. Only that field is sent to the research provider, with no selected image, notebook titles or private excerpts appended. The result displays private meeting excerpts and public findings in separate labelled passages, retaining both kinds of evidence. Offline mode uses labelled synthetic web fixtures.
 
 Recall currently indexes dated, spatially anchored typed meeting excerpts. It does not recognise a library of arbitrary handwriting. A topical overlap guard excludes semantically generic meeting matches; paraphrases with no shared topical words may need a more specific query. Text edits to a seeded meeting remove its old spatial anchors, so stale excerpts cannot be navigated as current evidence.
+
+## Pause assistance evaluation on 20 October 2026
+
+Use **Explicit only** for the essential demo. The [versioned held-out synthetic diagnostic](evaluations/pause-v1/REPORT.md) matched 9/12 expected routes and exposed unwanted clarification/activity pins on ordinary notes and negation. No prompts or thresholds were tuned. Real-handwriting accuracy and interruption burden remain unmeasured; the 24 fictional font-rendered examples are collection prompts, not human handwriting evidence. Those results describe the frozen baseline. The current branch keeps automatic clarification in a quiet Review control and can run research directly from recognised text; explicit research still requires a separately reviewed query. The baseline pin counts do not validate the current response UI.
+
+Recall verification: 28 Foundation tests and 42 iPad model/coordinator tests pass in the shared workspace, including prepared-question ranking, metadata refresh without re-embedding, private-query isolation and persisted anchor invalidation. The simulator Recall navigation test passes; its screenshot was inspected for region alignment. Combined live web research was not exercised in this session.
+
+## Scout response review · 20 October 2026
+
+The response card now bounds its complete layout inside the visible canvas, scrolls the full transcript/answer/caveat and keeps Insert and Review outside the scrolling text. Canvas insertion uses the inspector’s source validation, placement and undo path. Tapping the status opens an explanation and mode controls; “watching notes” does not mean microphone recording. Automatic none/clarify decisions do not open a response card; unclear text remains available through Review. Background captures no longer publish a user lasso selection, so a quiet decision cannot leave an unsolicited Ask Scout lasso control. The existing Decisions prompt and confidence threshold are unchanged.
+
+Foundation Debug and Release suites each pass 30 tests. The iPad model/coordinator suite passes 49 tests. Credential-launcher, secret-guard and frozen-evaluation hash/summary checks pass. All four Scout UI tests pass on an isolated iPad mini (A17 Pro), iOS 26.2: status explanation and mode changes; full-response scrolling at the largest accessibility text size after a real landscape frame transition; direct insertion and one-step undo; Recall source navigation; and fictional research → insert → edit → reopen. The result bundle reports four passed tests and zero failures. A final run against Scout source `33297ca` also passes all 49 model/coordinator tests plus both changed UI tests, including the background-capture regression. Earlier canvas checks for continuous ink/pan, notebook navigation and drawing after clearing also pass. No new live API or physical handwriting result is inferred from fixtures or simulator checks. The notebook intentionally forces its light theme even when a test requests system dark appearance.
+
+An all-tests run exposed an existing canvas failure in `testWritingBeyondStartingPageInEveryDirection`: after navigating to the left of the original page, the attempted stroke creates neither visible ink nor undo history. The same test fails at the same destination `(0.2, 0.8)` on frozen main `29e27b9`, using the same canvas extent implementation and unchanged `CanvasInputTests.swift`. The subsequent `InkCanvas.swift` change only separates background captures from user lasso selections. This remains an open canvas-coordinate issue; the complete suite is not green. Focused Scout runs verify the changed flows separately and do not run that known failing canvas test.

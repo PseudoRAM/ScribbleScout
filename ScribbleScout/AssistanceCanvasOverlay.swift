@@ -9,6 +9,8 @@ struct AssistanceCanvasOverlay: View {
     let controls: CanvasControls
     var selectionMode = false
     var openInspector: () -> Void
+    var insert: (Suggestion, BlockPlacement) -> Void
+    @State private var showingStatus = false
     @State private var editing: InsertedBlock?
     @GestureState private var blockDrag: [UUID: CGSize] = [:]
 
@@ -23,16 +25,14 @@ struct AssistanceCanvasOverlay: View {
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
             .coordinateSpace(name: "blockCanvas")
             .overlay(alignment: .topLeading) {
-                if let region = coordinator.region,
-                   coordinator.workPhase?.isAction == true || !coordinator.busy {
+                if let region = coordinator.region, coordinator.showsCanvasResponse {
                     let source = screenRect(region.bounds)
-                    let width = min(420, max(0, geometry.size.width - 32))
-                    let height = min(280, geometry.size.height * 0.42)
-                    responseCard(height: height)
-                        .frame(width: width)
-                        .frame(maxHeight: max(0, geometry.size.height - 80))
+                    let width = min(460, max(0, geometry.size.width - 32))
+                    let height = min(520, max(0, geometry.size.height - 32))
+                    responseCard
+                        .frame(width: width, height: height)
                         .offset(x: max(16, min(source.minX, geometry.size.width - width - 16)),
-                                y: max(64, min(source.maxY + 16, geometry.size.height - height - 190)))
+                                y: max(16, min(source.maxY + 16, geometry.size.height - height - 16)))
                 }
             }
             .overlay(alignment: .topTrailing) {
@@ -48,18 +48,31 @@ struct AssistanceCanvasOverlay: View {
                     .foregroundStyle(phase.isAction ? NotebookTheme.burgundy : NotebookTheme.muted)
                     .background(.regularMaterial, in: Capsule()).padding(16)
                     .accessibilityIdentifier("scoutActivity")
-                } else if coordinator.region == nil && credentials.mode == .automatic {
+                } else if !coordinator.showsCanvasResponse {
                     HStack(spacing: 8) {
-                        Label(credentials.offline ? "Scout · fictional demo" : (credentials.canProcess ? "Scout · listening" : "Scout · add API key"), systemImage: "waveform")
-                            .font(.callout.weight(.medium))
-                        Button { credentials.mode = .explicit } label: {
-                            Image(systemName: "pause.fill").frame(width: 44, height: 44)
-                        }.accessibilityLabel("Pause automatic Scout")
+                        Button { showingStatus = true } label: {
+                            Label(statusTitle, systemImage: "info.circle")
+                                .font(.callout.weight(.medium)).frame(minHeight: 44)
+                        }
+                        .accessibilityHint("Explains Scout’s mode and what is sent for processing")
+                        .accessibilityIdentifier("scoutStatus")
+                        if credentials.mode == .automatic {
+                            Button { credentials.mode = .explicit } label: {
+                                Image(systemName: "pause.fill").frame(width: 44, height: 44)
+                            }.accessibilityLabel("Pause automatic Scout")
+                        }
+                        if coordinator.region != nil {
+                            Button("Review", action: openInspector).frame(minHeight: 44)
+                        }
                     }
-                    .padding(.leading, 16).foregroundStyle(NotebookTheme.burgundy)
+                    .buttonStyle(.borderless)
+                    .padding(.horizontal, 16).foregroundStyle(NotebookTheme.burgundy)
                     .background(.regularMaterial, in: Capsule()).padding(16)
                 }
             }
+        }
+        .sheet(isPresented: $showingStatus) {
+            ScoutSettingsSheet(credentials: credentials, coordinator: coordinator)
         }
         .sheet(item: $editing) { block in
             AIBlockEditor(block: block, session: session, controls: controls)
@@ -71,7 +84,15 @@ struct AssistanceCanvasOverlay: View {
             .accessibilityLabel(phase.label)
     }
 
-    private func responseCard(height: CGFloat) -> some View {
+    private var statusTitle: String {
+        if credentials.mode == .off { return "Scout · off" }
+        if !credentials.canProcess { return credentials.apiKey.isEmpty ? "Scout · add API key" : "Scout · processing off" }
+        if coordinator.region != nil { return "Scout · review" }
+        if credentials.offline { return "Scout · fictional demo" }
+        return credentials.mode == .automatic ? "Scout · watching notes" : "Scout · ready"
+    }
+
+    private var responseCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: "sparkles").foregroundStyle(NotebookTheme.burgundy)
@@ -82,10 +103,11 @@ struct AssistanceCanvasOverlay: View {
                     Image(systemName: "xmark").frame(width: 44, height: 44)
                 }.accessibilityLabel("Dismiss Scout response")
             }
+            .fixedSize(horizontal: false, vertical: true)
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     if !coordinator.transcript.isEmpty {
-                        Text(coordinator.transcript).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        Text(coordinator.transcript).font(.caption).foregroundStyle(.secondary)
                     }
                     if !coordinator.streamingText.isEmpty {
                         Text(coordinator.streamingText).font(.body).frame(maxWidth: .infinity, alignment: .leading)
@@ -93,6 +115,7 @@ struct AssistanceCanvasOverlay: View {
                     } else if let suggestion = coordinator.suggestion, !suggestion.answer.isEmpty {
                         Text(.init(suggestion.answer)).font(.body).textSelection(.enabled)
                         Text(suggestion.caveat).font(.caption).foregroundStyle(.secondary)
+                            .accessibilityIdentifier("scoutResponseEnd")
                     } else if let activity = coordinator.activity {
                         Text(activity).font(.body).foregroundStyle(.secondary)
                         Text("Keep writing. Your response will appear here.").font(.caption).foregroundStyle(.secondary)
@@ -107,28 +130,54 @@ struct AssistanceCanvasOverlay: View {
                         Label(message, systemImage: coordinator.suggestion?.state == .failed ? "exclamationmark.triangle" : "info.circle")
                             .font(.callout).foregroundStyle(.secondary)
                     }
-                }.frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(maxHeight: height)
-            HStack(spacing: 12) {
-                Button("Review", systemImage: "text.viewfinder", action: openInspector)
-                    .frame(minHeight: 44).accessibilityIdentifier("assistancePin")
-                Spacer()
-                if coordinator.busy {
-                    Button("Stop", systemImage: "stop.circle") { coordinator.cancel() }.frame(minHeight: 44)
-                } else if coordinator.suggestion?.state == .failed {
-                    Button("Retry") { coordinator.recognise(using: credentials) }.frame(minHeight: 44)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityIdentifier("scoutResponseScroll")
+            ViewThatFits(in: .horizontal) {
+                responseActions
+                VStack(alignment: .leading, spacing: 8) { insertButton; reviewButton }
             }
             .font(.callout.weight(.semibold)).foregroundStyle(NotebookTheme.burgundy)
+            .fixedSize(horizontal: false, vertical: true)
         }
         .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .foregroundStyle(.primary)
         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20))
         .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(NotebookTheme.burgundy.opacity(0.25)))
         .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("scoutResponseCard")
+    }
+
+    private var insertButton: some View {
+        Button("Insert", systemImage: "plus.rectangle.on.rectangle") {
+            guard coordinator.validate(), coordinator.canInsert, let suggestion = coordinator.suggestion else { return }
+            insert(suggestion, .belowWriting)
+            coordinator.dismissSuggestion()
+        }
+        .disabled(!coordinator.canInsert)
+        .frame(minHeight: 44)
+        .accessibilityLabel("Insert editable AI block")
+        .accessibilityIdentifier("insertCanvasAIBlock")
+    }
+
+    private var reviewButton: some View {
+        Button("Review", systemImage: "text.viewfinder", action: openInspector)
+            .frame(minHeight: 44).accessibilityIdentifier("assistancePin")
+    }
+
+    private var responseActions: some View {
+        HStack(spacing: 12) {
+            insertButton
+            reviewButton
+            Spacer()
+            if coordinator.busy {
+                Button("Stop", systemImage: "stop.circle") { coordinator.cancel() }.frame(minHeight: 44)
+            }
+        }
     }
 
     private func blockView(_ block: InsertedBlock) -> some View {

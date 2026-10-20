@@ -190,7 +190,7 @@ struct ScoutSheet: View {
                             ForEach(BlockPlacement.allCases) { Text($0.rawValue).tag($0) }
                         }.accessibilityIdentifier("blockPlacement")
                         Button("Insert editable AI block", systemImage: "plus.rectangle.on.rectangle") {
-                            guard coordinator.validate(), let current = coordinator.suggestion else { return }
+                            guard coordinator.validate(), coordinator.canInsert, let current = coordinator.suggestion else { return }
                             insert(current, placement); coordinator.dismissSuggestion(); dismiss()
                         }
                         .disabled(!coordinator.canInsert).frame(minHeight: 44).accessibilityIdentifier("insertAIBlock")
@@ -260,6 +260,13 @@ struct ScoutSettingsSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("What Scout does") {
+                    Text("Scout watches your notes, not your microphone. It does not record audio.")
+                        .accessibilityIdentifier("scoutStatusExplanation")
+                    Text("In Automatic mode, Scout reads changed handwriting after a pause. Decisions checks the text and canvas context to choose whether help is needed. Ordinary notes stay quiet; unclear text waits for your review. A useful response appears on the canvas, where you can read, review or insert it.")
+                    Text("Live recognition sends the selected handwriting and a whole-canvas snapshot to OpenAI. Automatic research sends the recognised question to web search. Explicit only waits for Ask Scout; Off stops processing. Fictional offline demo uses scripted examples without network requests.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
                 Section("Assistance") {
                     Picker("Mode", selection: $credentials.mode) {
                         ForEach(ScoutSession.Mode.allCases) { Text($0.rawValue).tag($0) }

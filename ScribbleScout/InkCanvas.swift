@@ -171,9 +171,10 @@ final class CanvasControls: ObservableObject {
     @Published var message: String?
     @Published var selection: CanvasSelection?
 
-    func captureSelection(outline: [CGPoint]) {
-        selection = nil
-        guard let canvas = canvas as? NotebookCanvasView, outline.count >= 3 else { return }
+    @discardableResult
+    func captureSelection(outline: [CGPoint], publish: Bool = true) -> CanvasSelection? {
+        if publish { selection = nil }
+        guard let canvas = canvas as? NotebookCanvasView, outline.count >= 3 else { return nil }
         let path = UIBezierPath()
         path.move(to: outline[0])
         for point in outline.dropFirst() { path.addLine(to: point) }
@@ -185,9 +186,9 @@ final class CanvasControls: ObservableObject {
             let next = outline[(index + 1) % outline.count]
             doubledArea += point.x * next.y - next.x * point.y
         }
-        guard abs(doubledArea) >= 288 else { return }
+        guard abs(doubledArea) >= 288 else { return nil }
         guard rect.width.isFinite, rect.height.isFinite, rect.minX.isFinite, rect.minY.isFinite,
-              rect.width >= 12, rect.height >= 12 else { return }
+              rect.width >= 12, rect.height >= 12 else { return nil }
         func render(_ region: CGRect, mask: Bool) -> UIImage {
             let scale = min(2, 1600 / max(region.width, region.height))
             let format = UIGraphicsImageRendererFormat()
@@ -221,10 +222,12 @@ final class CanvasControls: ObservableObject {
         // Capture all occupied canvas content, including offscreen ink; bound image resolution, not its extent.
         let contextBounds = canvas.occupiedRect.union(rect)
         let contextImage = render(contextBounds, mask: false)
-        guard let png = image.pngData(), let contextPNG = contextImage.pngData() else { return }
-        selection = CanvasSelection(image: image, png: png, contextImage: contextImage, contextPNG: contextPNG,
+        guard let png = image.pngData(), let contextPNG = contextImage.pngData() else { return nil }
+        let captured = CanvasSelection(image: image, png: png, contextImage: contextImage, contextPNG: contextPNG,
                                     contextBounds: contextBounds, bounds: rect, outline: outline,
                                     region: CanvasSource.region(note: canvas.paper.note, drawing: canvas.drawing, bounds: rect))
+        if publish { selection = captured }
+        return captured
     }
 
     func resolveSource(_ region: NoteRegion) -> NoteRegion? {
@@ -244,9 +247,9 @@ final class CanvasControls: ObservableObject {
         let bounded = CGRect(x: rect.midX - min(rect.width, 1000) / 2,
                              y: rect.midY - min(rect.height, 1000) / 2,
                              width: min(rect.width, 1000), height: min(rect.height, 1000)).insetBy(dx: -16, dy: -16)
-        captureSelection(outline: [CGPoint(x: bounded.minX, y: bounded.minY), CGPoint(x: bounded.maxX, y: bounded.minY),
-                                   CGPoint(x: bounded.maxX, y: bounded.maxY), CGPoint(x: bounded.minX, y: bounded.maxY)])
-        return selection
+        // A background capture must not create an unsolicited lasso/Ask Scout control.
+        return captureSelection(outline: [CGPoint(x: bounded.minX, y: bounded.minY), CGPoint(x: bounded.maxX, y: bounded.minY),
+                                          CGPoint(x: bounded.maxX, y: bounded.maxY), CGPoint(x: bounded.minX, y: bounded.maxY)], publish: false)
     }
     func captureRecentChange() -> CanvasSelection? { captureChangedRegion() }
 

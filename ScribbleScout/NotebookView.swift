@@ -424,7 +424,8 @@ private struct NoteEditor: View {
                 }
                 .overlay {
                     AssistanceCanvasOverlay(session: session, credentials: scout, coordinator: assistance, viewport: controls.viewport,
-                                            controls: controls, selectionMode: selectedTool == .select) { showingScout = true }
+                                            controls: controls, selectionMode: selectedTool == .select,
+                                            openInspector: { showingScout = true }, insert: insertSuggestion)
                 }
                 .overlay(alignment: .top) {
                     if selectedTool == .select {
@@ -450,30 +451,7 @@ private struct NoteEditor: View {
             .background(Color(uiColor: NotebookTheme.paper))
         }
         .sheet(isPresented: $showingScout) {
-            ScoutSheet(credentials: scout, coordinator: assistance, sourceSession: store.sourceSession) { suggestion, placement in
-                let viewport = controls.viewport
-                let zoom = max(0.15, viewport.value.zoom)
-                let source = suggestion.request.region.bounds.cgRect
-                let ink = session.drawing.bounds
-                var x = (viewport.value.x + 48) / zoom
-                var y = (viewport.value.y + 100) / zoom
-                switch placement {
-                case .belowWriting:
-                    x = source.minX
-                    y = max(source.maxY, ink.isNull ? source.maxY : ink.maxY) + 32
-                case .besideSource: x = source.maxX + 32; y = source.minY
-                case .visibleCanvas: break
-                }
-                var target = CGRect(x: x, y: y, width: 380, height: 300)
-                let obstacles = [source, ink].filter { !$0.isNull } + (session.note.blocks ?? []).map { $0.bounds.cgRect }
-                for _ in 0...obstacles.count {
-                    guard let obstacle = obstacles.first(where: { $0.insetBy(dx: -16, dy: -16).intersects(target) }) else { break }
-                    target.origin.y = obstacle.maxY + 32
-                }
-                _ = session.insertBlock(suggestion, at: CanvasBounds(target), undoManager: controls.undoManager)
-                controls.navigate(to: CGPoint(x: target.midX, y: target.midY))
-                controls.refresh()
-            }
+            ScoutSheet(credentials: scout, coordinator: assistance, sourceSession: store.sourceSession, insert: insertSuggestion)
         }
         .onAppear { assistance.recallSearch = { query in try await store.recall(query) }; assistance.resolveSource = { region in CanvasSource.resolve(region, note: session.note, drawing: session.drawing) } }
         .onChange(of: session.note.drawingRevision) { _, _ in
@@ -510,6 +488,31 @@ private struct NoteEditor: View {
             Button("OK") { controls.message = nil }
         } message: { Text(controls.message ?? "") }
         .onDisappear { assistance.cancel(); session.flush() }
+    }
+
+    private func insertSuggestion(_ suggestion: Suggestion, placement: BlockPlacement) {
+        let viewport = controls.viewport
+        let zoom = max(0.15, viewport.value.zoom)
+        let source = suggestion.request.region.bounds.cgRect
+        let ink = session.drawing.bounds
+        var x = (viewport.value.x + 48) / zoom
+        var y = (viewport.value.y + 100) / zoom
+        switch placement {
+        case .belowWriting:
+            x = source.minX
+            y = max(source.maxY, ink.isNull ? source.maxY : ink.maxY) + 32
+        case .besideSource: x = source.maxX + 32; y = source.minY
+        case .visibleCanvas: break
+        }
+        var target = CGRect(x: x, y: y, width: 380, height: 300)
+        let obstacles = [source, ink].filter { !$0.isNull } + (session.note.blocks ?? []).map { $0.bounds.cgRect }
+        for _ in 0...obstacles.count {
+            guard let obstacle = obstacles.first(where: { $0.insetBy(dx: -16, dy: -16).intersects(target) }) else { break }
+            target.origin.y = obstacle.maxY + 32
+        }
+        _ = session.insertBlock(suggestion, at: CanvasBounds(target), undoManager: controls.undoManager)
+        controls.navigate(to: CGPoint(x: target.midX, y: target.midY))
+        controls.refresh()
     }
 
     private func header(compact: Bool) -> some View {

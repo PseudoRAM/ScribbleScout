@@ -1,0 +1,237 @@
+{
+  "completedUTC" : "2026-10-20T02:52:36Z",
+  "dataset" : "pause-v1",
+  "hostOS" : "Version 26.6.2 (Build 25G83)",
+  "manifestSHA256" : "9ac9e4ccd3d80c5fcb2890bb6502b03b437fb5c8cd9211a034f05d0458f76571",
+  "minimumConfidence" : 0.75,
+  "model" : "gpt-6-luna",
+  "providerSHA256" : "7919e489dae06d7fad529668906784ab7596f04fa7579ef9194d383ffe86f4f7",
+  "routingInstructionsSHA256" : "0ae7c425ae764debd4648928d3dffed25ca9196d497c70dff2030504d1fe0d38",
+  "rows" : [
+    {
+      "actualRoute" : "web_research",
+      "confidence" : 0.98999999999999999,
+      "estimatedPauseToReviewSeconds" : 4.2151939153671263,
+      "expectedRoute" : "web_research",
+      "fallback" : false,
+      "finalPinProxy" : true,
+      "id" : "question-03",
+      "pipelineSeconds" : 2.4151899814605713,
+      "recognitionSeconds" : 2.185776948928833,
+      "routeCorrect" : true,
+      "routingSeconds" : 0.22906494140625,
+      "transcript" : "Does Stripe Checkout support metered billing now?",
+      "uncertainty" : [
+
+      ],
+      "useful" : true
+    },
+    {
+      "actualRoute" : "web_research",
+      "confidence" : 0.81000000000000005,
+      "estimatedPauseToReviewSeconds" : 3.9054959297180174,
+      "expectedRoute" : "web_research",
+      "fallback" : false,
+      "finalPinProxy" : true,
+      "id" : "question-04",
+      "pipelineSeconds" : 2.1054940223693848,
+      "recognitionSeconds" : 1.8442929983139038,
+      "routeCorrect" : true,
+      "routingSeconds" : 0.26117396354675293,
+      "transcript" : "Find current official docs for WebAuthn passkeys.",
+      "uncertainty" : [
+
+      ],
+      "useful" : true
+    },
+    {
+      "actualRoute" : "clarify",
+      "confidence" : 0.69999999999999996,
+      "estimatedPauseToReviewSeconds" : 3.3750770568847654,
+      "expectedRoute" : "quick_response",
+      "fallback" : false,
+      "finalPinProxy" : true,
+      "id" : "explanation-03",
+      "pipelineSeconds" : 1.5750750303268433,
+      "recognitionSeconds" : 1.4020760059356689,
+      "routeCorrect" : false,
+      "routingSeconds" : 0.17295897006988525,
+      "transcript" : "Explain the difference between a stack and a queue.",
+      "uncertainty" : [
+
+      ],
+      "useful" : true
+    },
+    {
+      "actualRoute" : "quick_response",
+      "confidence" : 0.90000000000000002,
+      "estimatedPauseToReviewSeconds" : 3.5313489913940428,
+      "expectedRoute" : "quick_response",
+      "fallback" : false,
+      "finalPinProxy" : true,
+      "id" : "explanation-04",
+      "pipelineSeconds" : 1.7313460111618042,
+      "recognitionSeconds" : 1.6541639566421509,
+      "routeCorrect" : true,
+      "routingSeconds" : 0.077165007591247559,
+      "transcript" : "Summarise this: cache reads are fast; writes invalidate\nthe cache.",
+      "uncertainty" : [
+
+      ],
+      "useful" : true
+    },
+    {
+      "actualRoute" : "recall",
+      "confidence" : 0.95999999999999996,
+      "estimatedPauseToReviewSeconds" : 3.9242870092391966,
+      "expectedRoute" : "recall",
+      "fallback" : false,
+      "finalPinProxy" : false,
+      "id" : "past_decision-03",
+      "pipelineSeconds" : 2.124271035194397,
+      "recognitionSeconds" : 1.9832650423049927,
+      "routeCorrect" : true,
+      "routingSeconds" : 0.14097404479980469,
+      "transcript" : "Why did we reject polling in the previous meeting?",
+      "uncertainty" : [
+
+      ],
+      "useful" : true
+    },
+    {
+      "actualRoute" : "recall",
+      "confidence" : 0.93999999999999995,
+      "estimatedPauseToReviewSeconds" : 5.0795939445495604,
+      "expectedRoute" : "recall",
+      "fallback" : false,
+      "finalPinProxy" : false,
+      "id" : "past_decision-04",
+      "pipelineSeconds" : 3.2795929908752441,
+      "recognitionSeconds" : 3.2080860137939453,
+      "routeCorrect" : true,
+      "routingSeconds" : 0.071493029594421387,
+      "transcript" : "What retention window did we agree on last week?",
+      "uncertainty" : [
+
+      ],
+      "useful" : true
+    },
+    {
+      "actualRoute" : "clarify",
+      "confidence" : 0.45000000000000001,
+      "estimatedPauseToReviewSeconds" : 3.3932030677795408,
+      "expectedRoute" : "none",
+      "fallback" : false,
+      "finalPinProxy" : true,
+      "id" : "ordinary-03",
+      "pipelineSeconds" : 1.5932010412216187,
+      "recognitionSeconds" : 1.5071669816970825,
+      "routeCorrect" : false,
+      "routingSeconds" : 0.086020946502685547,
+      "transcript" : "Agenda: budget? timing? owners? These are headings only.",
+      "uncertainty" : [
+
+      ],
+      "useful" : false
+    },
+    {
+      "actualRoute" : "none",
+      "confidence" : 0.93000000000000005,
+      "estimatedPauseToReviewSeconds" : 3.5332290410995482,
+      "expectedRoute" : "none",
+      "fallback" : false,
+      "finalPinProxy" : false,
+      "id" : "ordinary-04",
+      "pipelineSeconds" : 1.7332229614257812,
+      "recognitionSeconds" : 1.6345300674438477,
+      "routeCorrect" : true,
+      "routingSeconds" : 0.098683953285217285,
+      "transcript" : "Cache TTL = 20 seconds. Owner: Sam. Review on Friday.",
+      "uncertainty" : [
+
+      ],
+      "useful" : false
+    },
+    {
+      "actualRoute" : "clarify",
+      "confidence" : 0.64000000000000001,
+      "estimatedPauseToReviewSeconds" : 3.684676933288574,
+      "expectedRoute" : "none",
+      "fallback" : false,
+      "finalPinProxy" : true,
+      "id" : "negation-03",
+      "pipelineSeconds" : 1.8846759796142578,
+      "recognitionSeconds" : 1.8022509813308716,
+      "routeCorrect" : false,
+      "routingSeconds" : 0.082415938377380371,
+      "transcript" : "Do not answer this question: does the API support streaming?",
+      "uncertainty" : [
+
+      ],
+      "useful" : false
+    },
+    {
+      "actualRoute" : "none",
+      "confidence" : 0.79000000000000004,
+      "estimatedPauseToReviewSeconds" : 3.4843569278717039,
+      "expectedRoute" : "none",
+      "fallback" : false,
+      "finalPinProxy" : false,
+      "id" : "negation-04",
+      "pipelineSeconds" : 1.684351921081543,
+      "recognitionSeconds" : 1.5993779897689819,
+      "routeCorrect" : true,
+      "routingSeconds" : 0.084955096244812012,
+      "transcript" : "We are not asking for research or advice. Record the\ndecision only.",
+      "uncertainty" : [
+
+      ],
+      "useful" : false
+    },
+    {
+      "actualRoute" : "clarify",
+      "confidence" : 0.80000000000000004,
+      "estimatedPauseToReviewSeconds" : 3.6446559906005858,
+      "expectedRoute" : "clarify",
+      "fallback" : false,
+      "finalPinProxy" : true,
+      "id" : "incomplete-03",
+      "pipelineSeconds" : 1.8446530103683472,
+      "recognitionSeconds" : 1.6928629875183105,
+      "routeCorrect" : true,
+      "routingSeconds" : 0.15175306797027588,
+      "transcript" : "What about that thing from",
+      "uncertainty" : [
+
+      ],
+      "useful" : false
+    },
+    {
+      "actualRoute" : "clarify",
+      "confidence" : 0.75,
+      "estimatedPauseToReviewSeconds" : 4.6807419538497923,
+      "expectedRoute" : "clarify",
+      "fallback" : false,
+      "finalPinProxy" : true,
+      "id" : "incomplete-04",
+      "pipelineSeconds" : 2.8807389736175537,
+      "recognitionSeconds" : 2.8072800636291504,
+      "routeCorrect" : true,
+      "routingSeconds" : 0.073428988456726074,
+      "transcript" : "Does the new",
+      "uncertainty" : [
+
+      ],
+      "useful" : false
+    }
+  ],
+  "runnerSHA256" : "2fb54802e74eac847b3ff10baa69491b4c704c516675622a1ee080abb7f37f71",
+  "scope" : "Synthetic image recognition + routing only; pin is inferred from coordinator, not observed UI; no search or answers",
+  "startedUTC" : "2026-10-20T02:52:11Z",
+  "usage" : {
+    "inputTokens" : 10701,
+    "outputTokens" : 355,
+    "requests" : 24,
+    "toolCalls" : 0
+  }
+}
