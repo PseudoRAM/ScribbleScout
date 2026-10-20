@@ -9,8 +9,10 @@ An iPad notebook built with SwiftUI and PencilKit, with handwriting, typed notes
 - Undo and redo for ink, page zoom, and a saved viewport for each note.
 - Automatic local saving with a previous snapshot for recovery.
 
-## Project status
+## Running the app
 
-The repository currently contains Swift source files in `ScribbleScout/`. An Xcode project is not yet included. AI features are not yet implemented.
+Open `ScribbleScout.xcodeproj` in Xcode, select the `ScribbleScout` scheme, and run on an iPad simulator or device with iOS 18 or later. For a physical device, select your development team in Signing & Capabilities.
 
-To run the current source, create an iOS App project in Xcode using SwiftUI with an iOS 17 or later deployment target. Replace the generated app and content view files with the Swift files in `ScribbleScout/`, then run on an iPad simulator or device.
+The `ScribbleScoutTests` target covers local note persistence and recovery. Run it with Product > Test in Xcode.
+
+AI features are not yet implemented.
