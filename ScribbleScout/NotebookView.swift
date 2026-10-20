@@ -26,7 +26,7 @@ struct NotebookView: View {
         GeometryReader { geometry in
             Group {
                 if let session = store.current {
-                    NoteEditor(session: session, scout: scout) { showingNotebook.toggle() }
+                    NoteEditor(session: session, scout: scout, store: store) { showingNotebook.toggle() }
                         .id(session.id).accessibilityHidden(showingNotebook).allowsHitTesting(!showingNotebook)
                 } else {
                     ContentUnavailableView {
@@ -350,9 +350,10 @@ private struct LassoAssistanceOverlay: View {
 }
 
 private enum DrawingTool: String, CaseIterable {
-    case pen = "Pen", marker = "Highlighter", eraser = "Eraser", lasso = "Lasso"
+    case select = "Select", pen = "Pen", marker = "Highlighter", eraser = "Eraser", lasso = "Lasso"
     var symbol: String {
         switch self {
+        case .select: "cursorarrow"
         case .pen: "pencil"
         case .marker: "highlighter"
         case .eraser: "eraser"
@@ -369,6 +370,7 @@ private struct SharedPage: Identifiable {
 private struct NoteEditor: View {
     @ObservedObject var session: NoteSession
     @ObservedObject var scout: ScoutSession
+    @ObservedObject var store: NotebookStore
     var openNotebook: () -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @StateObject private var controls = CanvasControls()
@@ -389,7 +391,7 @@ private struct NoteEditor: View {
         case .pen: PKInkingTool(.pen, color: UIColor(inkColor), width: width)
         case .marker: PKInkingTool(.marker, color: UIColor(inkColor).withAlphaComponent(0.35), width: width * 5)
         case .eraser: PKEraserTool(.vector)
-        case .lasso: PKLassoTool()
+        case .select, .lasso: PKLassoTool()
         }
     }
 
@@ -404,7 +406,9 @@ private struct NoteEditor: View {
                         Button("Retry") { session.flush() }.buttonStyle(.bordered)
                     }.foregroundStyle(.red).padding().background(.red.opacity(0.08))
                 }
-                InkCanvas(session: session, controls: controls, tool: tool, fingerDrawing: fingerDrawing)
+                InkCanvas(session: session, controls: controls, tool: tool,
+                          fingerDrawing: fingerDrawing || selectedTool == .select,
+                          capturesLassoRegion: selectedTool == .lasso)
                 .overlay(alignment: .topLeading) {
                     if session.note.template == .checkout && showingConceptCards {
                         CanvasAnnotations(session: session, viewport: controls.viewport) { contextAction = $0 }
@@ -419,8 +423,17 @@ private struct NoteEditor: View {
                     }
                 }
                 .overlay {
-                    AssistanceCanvasOverlay(session: session, coordinator: assistance, viewport: controls.viewport,
-                                            controls: controls) { showingScout = true }
+                    AssistanceCanvasOverlay(session: session, credentials: scout, coordinator: assistance, viewport: controls.viewport,
+                                            controls: controls, selectionMode: selectedTool == .select,
+                                            openInspector: { showingScout = true }, insert: insertSuggestion)
+                }
+                .overlay(alignment: .top) {
+                    if selectedTool == .select {
+                        Text("Circle ink, then drag it to move. Drag AI blocks directly.")
+                            .font(.caption).padding(10)
+                            .background(.regularMaterial, in: Capsule())
+                            .padding(8).allowsHitTesting(false)
+                    }
                 }
                 .clipped()
                 .overlay(alignment: .bottomTrailing) {
@@ -438,39 +451,23 @@ private struct NoteEditor: View {
             .background(Color(uiColor: NotebookTheme.paper))
         }
         .sheet(isPresented: $showingScout) {
-            ScoutSheet(credentials: scout, coordinator: assistance) { suggestion, placement in
-                let viewport = controls.viewport
-                let zoom = max(0.15, viewport.value.zoom)
-                let source = suggestion.request.region.bounds.cgRect
-                let ink = session.drawing.bounds
-                var x = (viewport.value.x + 48) / zoom
-                var y = (viewport.value.y + 100) / zoom
-                switch placement {
-                case .belowWriting:
-                    x = source.minX
-                    y = max(source.maxY, ink.isNull ? source.maxY : ink.maxY) + 32
-                case .besideSource: x = source.maxX + 32; y = source.minY
-                case .visibleCanvas: break
-                }
-                var target = CGRect(x: x, y: y, width: 380, height: 300)
-                let obstacles = [source, ink].filter { !$0.isNull } + (session.note.blocks ?? []).map { $0.bounds.cgRect }
-                for _ in 0...obstacles.count {
-                    guard let obstacle = obstacles.first(where: { $0.insetBy(dx: -16, dy: -16).intersects(target) }) else { break }
-                    target.origin.y = obstacle.maxY + 32
-                }
-                _ = session.insertBlock(suggestion, at: CanvasBounds(target), undoManager: controls.undoManager)
-                controls.navigate(to: CGPoint(x: target.midX, y: target.midY))
-                controls.refresh()
-            }
+            ScoutSheet(credentials: scout, coordinator: assistance, sourceSession: store.sourceSession, insert: insertSuggestion)
         }
-        .onAppear { assistance.resolveSource = { region in CanvasSource.resolve(region, note: session.note, drawing: session.drawing) } }
+        .onAppear { assistance.recallSearch = { query in try await store.recall(query) }; assistance.resolveSource = { region in CanvasSource.resolve(region, note: session.note, drawing: session.drawing) } }
         .onChange(of: session.note.drawingRevision) { _, _ in
             if assistance.region != nil { assistance.validate() }
             assistance.schedulePause(using: scout) { controls.captureChangedRegion() }
         }
         .onChange(of: session.note.text) { _, _ in if assistance.region != nil { assistance.validate() } }
         .onChange(of: session.note.attachment) { _, _ in if assistance.region != nil { assistance.validate() } }
-        .onChange(of: scout.mode) { _, mode in if mode != .automatic { assistance.stopAutomatic() } }
+        .onChange(of: scout.mode) { _, mode in
+            if mode != .automatic { assistance.stopAutomatic() }
+            else { assistance.schedulePause(using: scout) { controls.captureChangedRegion() } }
+        }
+        .onChange(of: scout.canProcess) { _, allowed in
+            if allowed { assistance.schedulePause(using: scout) { controls.captureChangedRegion() } }
+            else { assistance.cancel() }
+        }
 
         .sheet(isPresented: $editingText) { textSheet }
         .sheet(item: $contextAction) { action in contextSheet(action) }
@@ -491,6 +488,31 @@ private struct NoteEditor: View {
             Button("OK") { controls.message = nil }
         } message: { Text(controls.message ?? "") }
         .onDisappear { assistance.cancel(); session.flush() }
+    }
+
+    private func insertSuggestion(_ suggestion: Suggestion, placement: BlockPlacement) {
+        let viewport = controls.viewport
+        let zoom = max(0.15, viewport.value.zoom)
+        let source = suggestion.request.region.bounds.cgRect
+        let ink = session.drawing.bounds
+        var x = (viewport.value.x + 48) / zoom
+        var y = (viewport.value.y + 100) / zoom
+        switch placement {
+        case .belowWriting:
+            x = source.minX
+            y = max(source.maxY, ink.isNull ? source.maxY : ink.maxY) + 32
+        case .besideSource: x = source.maxX + 32; y = source.minY
+        case .visibleCanvas: break
+        }
+        var target = CGRect(x: x, y: y, width: 380, height: 300)
+        let obstacles = [source, ink].filter { !$0.isNull } + (session.note.blocks ?? []).map { $0.bounds.cgRect }
+        for _ in 0...obstacles.count {
+            guard let obstacle = obstacles.first(where: { $0.insetBy(dx: -16, dy: -16).intersects(target) }) else { break }
+            target.origin.y = obstacle.maxY + 32
+        }
+        _ = session.insertBlock(suggestion, at: CanvasBounds(target), undoManager: controls.undoManager)
+        controls.navigate(to: CGPoint(x: target.midX, y: target.midY))
+        controls.refresh()
     }
 
     private func header(compact: Bool) -> some View {
@@ -552,6 +574,11 @@ private struct NoteEditor: View {
             Button("Return to canvas start", systemImage: "house", action: controls.resetZoom)
             Button("Typed notes", systemImage: "textformat") { editingText = true }
             Button("Ask Scout", systemImage: "sparkles", action: openScout)
+            Button("Recall dated meetings", systemImage: "clock") {
+                openScout()
+                assistance.transcript = NoteRecord.recallQuestion
+                assistance.recall()
+            }
             Toggle("Show fictional concept cards", isOn: $showingConceptCards)
             if session.note.attachment != nil {
                 Button("Remove photo", systemImage: "photo.badge.minus") { session.edit { $0.attachment = nil } }
@@ -678,6 +705,7 @@ private struct NoteEditor: View {
             .contentShape(Rectangle())
         }
         .accessibilityLabel(item.rawValue).accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityHint(item == .select ? "Circle handwriting or shapes, then drag to move. Drag AI blocks directly." : "")
     }
 
     private var textSheet: some View {

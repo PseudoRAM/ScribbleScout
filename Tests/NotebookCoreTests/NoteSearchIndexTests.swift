@@ -81,6 +81,32 @@ struct NoteSearchIndexTests {
     }
 
     @Test
+    func preparedDatedRecallFindsOnlyRelevantMeetingsAndRefreshesAnchorsWithoutEmbedding() throws {
+        let meetings = NoteRecord.fictionalMeetings
+        let documents = meetings.map(\.searchDocument)
+        var index = NoteSearchIndex()
+        index.update(documents, model: "text-only", dimensions: 0) { _ in nil }
+        let results = index.search(NoteRecord.recallQuestion, vector: nil, documents: documents)
+        #expect(Set(results.prefix(3).map(\.id)) == Set(meetings.prefix(2).map(\.id)))
+        #expect(!results.contains { $0.id == meetings[2].id })
+        #expect(results.allSatisfy { $0.evidence?.meetingDate != nil && $0.evidence?.revision == 1 && $0.evidence?.bounds != nil })
+        #expect(Set(meetings.prefix(2).flatMap { $0.meetingEvidence ?? [] }.compactMap(\.claim)) == ["Proposal", "Assumption", "Settled decision"])
+        // Even a generic high semantic similarity must not introduce the unrelated meeting.
+        index.update(documents, model: "vectors", dimensions: 2) { _ in [1, 0] }
+        #expect(!index.search(NoteRecord.recallQuestion, vector: [1, 0], documents: documents).contains { $0.id == meetings[2].id })
+        var moved = documents
+        moved[0].evidence[0].bounds?.x = 120
+        moved[0].evidence[0].revision = 2
+        #expect(!index.update(moved, model: "vectors", dimensions: 2) { _ in Issue.record("Metadata must not re-embed text"); return nil })
+        let match = index.search("tailored payment flow", vector: nil, documents: moved).first
+        #expect(match?.evidence?.bounds?.x == 120 && match?.evidence?.revision == 2)
+        let roundTrip = try JSONDecoder().decode(NoteRecord.self, from: JSONEncoder().encode(meetings[0]))
+        #expect(roundTrip.meetingEvidence == meetings[0].meetingEvidence)
+        #expect(index.search("checkout", vector: nil, documents: documents).count == 2)
+        #expect(index.search(meetings[2].title, vector: nil, documents: documents).first?.id == meetings[2].id)
+    }
+
+    @Test
     func chunksLongUnicodeParagraphsWithoutDroppingText() {
         let words = Array(repeating: "Hello 📝 世界", count: 150).joined(separator: " ")
         let chunks = NoteSearchIndex.chunks("\n \n" + words + "\n" + String(repeating: "界", count: 901))

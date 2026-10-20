@@ -40,6 +40,9 @@ struct FixtureProvider: AssistanceProvider {
                                     evidence: evidence, isStale: true)
         }
         if !research && scenario != .failed {
+            if text.lowercased().contains("database index") {
+                return AssistanceAnswer(text: "Fictional demo: A database index keeps selected column values in a structure that helps the database find matching rows without scanning the entire table. It can speed up reads, but takes storage and must be updated when rows change. Choose indexes around the queries you actually run, and check the query plan before assuming an index will help.", citations: [], caveat: "Synthetic explanation for the demo.")
+            }
             return AssistanceAnswer(text: "Fictional demo: A retention window sets how long records remain available before scheduled deletion. Review the window against the purpose of the records and document the agreed policy.", citations: [], caveat: "Synthetic explanation for the demo.")
         }
         switch scenario {
@@ -80,7 +83,7 @@ extension Suggestion {
     var hasValidEvidence: Bool {
         evidence.allSatisfy(\.isValid) &&
         (isFixture || !evidence.contains { $0.kind == .fixture }) &&
-        (!isFixture || evidence.allSatisfy { $0.kind == .fixture }) &&
+        (!isFixture || evidence.allSatisfy { $0.kind == .fixture || ($0.kind == .note && $0.isFictional == true) }) &&
         (request.intent != .recall || !evidence.filter { $0.kind == .note || (isFixture && $0.kind == .fixture) }.isEmpty) &&
         (request.intent != .webResearch || !evidence.filter { $0.kind == .web || (isFixture && $0.kind == .fixture) }.isEmpty) &&
         (request.sourceMode != .notes || !evidence.contains { $0.kind == .web }) &&

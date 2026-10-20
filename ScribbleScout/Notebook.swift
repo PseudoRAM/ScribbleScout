@@ -117,6 +117,14 @@ final class NoteSession: ObservableObject, Identifiable {
     func edit(_ change: (inout NoteRecord) -> Void) {
         var updated = note
         change(&updated)
+        if updated.text != storedNote.text { updated.meetingEvidence = nil }
+        else if updated.title != storedNote.title {
+            updated.meetingEvidence = updated.meetingEvidence?.map { source in
+                var source = source
+                source.title = updated.title
+                return source
+            }
+        }
         let searchableChanged = updated.title != storedNote.title || updated.text != storedNote.text
         updated.updatedAt = Date()
         viewport = updated.viewport
@@ -234,6 +242,11 @@ final class NotebookStore: ObservableObject {
             semanticSearch = LocalSemanticSearch(cacheURL: repository.root.appendingPathComponent("search-index.json"))
             let listing = try repository.list()
             notes = listing.notes
+            for meeting in NoteRecord.fictionalMeetings where !notes.contains(where: { $0.id == meeting.id }) {
+                let example = NoteSession(note: meeting, drawing: PKDrawing(), repository: repository)
+                if example.flush() { notes.append(example.note) }
+                else { issue = example.saveError }
+            }
             if !listing.warnings.isEmpty { issue = listing.warnings.joined(separator: "\n\n") }
             // Install the reference page once; existing notes and their last-opened page stay intact.
             if !notes.contains(where: { $0.template == .checkout }) {
@@ -284,10 +297,30 @@ final class NotebookStore: ObservableObject {
         search(searchQuery)
     }
 
+    func recall(_ query: String) async throws -> [Evidence] {
+        guard let semanticSearch else { return [] }
+        let documents = searchableNotes.map(\.searchDocument)
+        let response = try await semanticSearch.search(query, documents: documents)
+        return response.matches.filter { $0.evidence != nil }.prefix(3).flatMap { match in
+            let latest = searchableNotes.first { $0.id == match.id }?.meetingEvidence ?? []
+            let sources = (documents.first { $0.id == match.id }?.evidence ?? []).filter { latest.contains($0) }
+            return sources.sorted { ($0.id == match.evidence?.id ? 0 : 1) < ($1.id == match.evidence?.id ? 0 : 1) }
+        }
+    }
+
+    func sourceSession(_ evidence: Evidence) -> NoteSession? {
+        guard let id = evidence.canvasID, let repository,
+              searchableNotes.first(where: { $0.id == id })?.meetingEvidence?.contains(evidence) == true,
+              let value = try? repository.load(id),
+              value.note.meetingEvidence?.contains(evidence) == true else { return nil }
+        return NoteSession(note: value.note, drawing: value.drawing, repository: repository)
+    }
+
     func search(_ query: String) {
         let documents = searchableNotes.map {
             NoteSearchDocument(id: $0.id, title: $0.title,
-                               text: ($0.template == .checkout ? CheckoutPaper.transcript + "\n" : "") + $0.text)
+                               text: ($0.template == .checkout ? CheckoutPaper.transcript + "\n" : "") + $0.text,
+                               evidence: $0.meetingEvidence ?? [])
         }.sorted { $0.id.uuidString < $1.id.uuidString }
         guard query != searchQuery || documents != searchedDocuments else { return }
         searchQuery = query

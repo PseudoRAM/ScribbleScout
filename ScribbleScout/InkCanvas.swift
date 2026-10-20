@@ -400,7 +400,7 @@ private final class PaperView: UIView {
         didSet {
             // Ink, save metadata, and the viewport do not change the paper pixels.
             if note.paper != oldValue.paper || note.template != oldValue.template ||
-                note.text != oldValue.text || note.attachment != oldValue.attachment {
+                note.text != oldValue.text || note.attachment != oldValue.attachment || note.meetingEvidence != oldValue.meetingEvidence {
                 setNeedsDisplay()
             }
         }
@@ -414,7 +414,16 @@ private final class PaperView: UIView {
             image.draw(in: CGRect(x: 60, y: 60,
                                   width: width, height: width * image.size.height / image.size.width))
         }
-        if !note.text.isEmpty && note.template == nil {
+        if let evidence = note.meetingEvidence {
+            (note.title as NSString).draw(at: CGPoint(x: 60, y: 50), withAttributes: [.font: UIFont.boldSystemFont(ofSize: 28), .foregroundColor: UIColor(NotebookTheme.ink)])
+            for source in evidence {
+                guard let bounds = source.bounds else { continue }
+                let heading = "\(source.claim ?? "Note") · \(source.meetingDate?.formatted(date: .abbreviated, time: .omitted) ?? "") · Fictional"
+                ((heading + "\n\n" + source.excerpt) as NSString).draw(in: bounds.cgRect,
+                    withAttributes: [.font: UIFont.systemFont(ofSize: 25), .foregroundColor: UIColor(NotebookTheme.ink)])
+            }
+        }
+        if !note.text.isEmpty && note.template == nil && note.meetingEvidence == nil {
             (note.text as NSString).draw(in: CGRect(x: 60, y: note.attachment == nil ? 60 : 400,
                                                    width: bounds.width - 120, height: bounds.height - 140),
                                        withAttributes: [.font: UIFont(name: "Caveat-Regular", size: 32) ?? .systemFont(ofSize: 28),
@@ -429,11 +438,13 @@ private final class NotebookCanvasView: PKCanvasView {
     var readyForViewport = false
     var initialViewport = PageViewport()
     var viewportDidInitialize: (() -> Void)?
+    var capturesLassoRegion = true
     var lassoDidBegin: (() -> Void)?
     var lassoDidFinish: (([CGPoint]) -> Void)?
     var pageSize = NotebookPage.size
     private(set) var worldBounds = CGRect.zero
     private(set) var updatingExtent = false
+    var isUsingTool = false
     private var previousFitZoom: CGFloat = 0
     var fitZoomScale: CGFloat { min(1, max(0.25, bounds.width / pageSize.width)) }
     var visibleRect: CGRect {
@@ -462,8 +473,13 @@ private final class NotebookCanvasView: PKCanvasView {
                             height: ceil(padded.maxY / 1024) * 1024 - floor(padded.minY / 1024) * 1024)
         worldBounds = worldBounds.union(extent)
         let offset = contentOffset
-        // PencilKit owns its drawable content size. Resizing it during a stroke cancels live ink.
-        // Grow only the scroll margins, leaving the native drawing and zoom geometry stable.
+        // Insets allow navigation, but PencilKit also needs a drawable surface beyond the page.
+        // Reserve it ahead of the viewport, and never resize while a tool is touching the canvas.
+        if !isUsingTool {
+            let size = CGSize(width: max(pageSize.width, worldBounds.maxX) * zoomScale,
+                              height: max(pageSize.height, worldBounds.maxY) * zoomScale)
+            if contentSize != size { contentSize = size }
+        }
         let inset = UIEdgeInsets(top: -worldBounds.minY * zoomScale, left: -worldBounds.minX * zoomScale,
                                  bottom: max(0, worldBounds.maxY * zoomScale - contentSize.height),
                                  right: max(0, worldBounds.maxX * zoomScale - contentSize.width))
@@ -528,6 +544,7 @@ private final class LassoRegionGesture: UIGestureRecognizer, UIGestureRecognizer
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         guard trackedTouch == nil, touches.count == 1, let touch = touches.first,
               let canvas = view as? NotebookCanvasView, canvas.tool is PKLassoTool,
+              canvas.capturesLassoRegion, canvas.drawingGestureRecognizer.isEnabled,
               touch.type == .pencil || canvas.drawingPolicy == .anyInput else {
             state = state == .possible ? .failed : .cancelled
             return
@@ -596,6 +613,8 @@ struct InkCanvas: UIViewRepresentable {
     var controls: CanvasControls
     var tool: PKTool
     var fingerDrawing: Bool
+    var readOnly = false
+    var capturesLassoRegion = true
 
     func makeUIView(context: Context) -> UIView {
         let container = CanvasContainer()
@@ -616,6 +635,8 @@ struct InkCanvas: UIViewRepresentable {
         canvas.paper.note = session.note
         canvas.pattern.style = session.note.paper
         canvas.tool = tool
+        canvas.capturesLassoRegion = capturesLassoRegion
+        canvas.drawingGestureRecognizer.isEnabled = !readOnly
         canvas.drawingPolicy = fingerDrawing ? .anyInput : .pencilOnly
         canvas.accessibilityLabel = "Handwriting canvas"
         canvas.accessibilityValue = session.note.template == .checkout ? CheckoutPaper.transcript : session.note.text
@@ -638,6 +659,16 @@ struct InkCanvas: UIViewRepresentable {
         if let ink = tool as? PKInkingTool, (canvas.tool as? PKInkingTool) != ink { canvas.tool = ink }
         if let eraser = tool as? PKEraserTool, (canvas.tool as? PKEraserTool) != eraser { canvas.tool = eraser }
         if tool is PKLassoTool, !(canvas.tool is PKLassoTool) { canvas.tool = tool }
+        if canvas.capturesLassoRegion != capturesLassoRegion {
+            canvas.capturesLassoRegion = capturesLassoRegion
+            // Clear PencilKit's previous selection when changing between Select and Scout's lasso.
+            canvas.tool = PKInkingTool(.pen)
+            canvas.tool = tool
+        }
+        canvas.accessibilityHint = tool is PKLassoTool && !capturesLassoRegion
+            ? "Circle ink, then drag the selection to move it. Use two fingers to pan or pinch to zoom."
+            : "Write with Apple Pencil. Pinch to zoom. Use two fingers to scroll when finger drawing is on."
+        canvas.drawingGestureRecognizer.isEnabled = !readOnly
         let policy: PKCanvasViewDrawingPolicy = fingerDrawing ? .anyInput : .pencilOnly
         if canvas.drawingPolicy != policy { canvas.drawingPolicy = policy }
         let contentChanged = canvas.paper.note != session.note
@@ -659,7 +690,20 @@ struct InkCanvas: UIViewRepresentable {
         private var pendingOverview: DispatchWorkItem?
         init(session: NoteSession, controls: CanvasControls) { self.session = session; self.controls = controls }
 
+        func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) {
+            (canvasView as? NotebookCanvasView)?.isUsingTool = true
+        }
+
+        func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
+            guard let canvas = canvasView as? NotebookCanvasView else { return }
+            canvas.isUsingTool = false
+            canvas.expand(toInclude: canvas.occupiedRect.union(canvas.visibleRect))
+        }
+
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
+            if let canvas = canvasView as? NotebookCanvasView {
+                canvas.expand(toInclude: canvas.occupiedRect.union(canvas.visibleRect))
+            }
             // Keep an emptied canvas ready for the next Pencil stroke, including after undo.
             if canvasView.window != nil && canvasView.drawing.strokes.isEmpty {
                 canvasView.becomeFirstResponder()

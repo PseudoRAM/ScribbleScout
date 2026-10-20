@@ -1,0 +1,246 @@
+{
+  "version": "pause-v1",
+  "frozenBeforeTuning": true,
+  "samples": [
+    {
+      "id": "question-01",
+      "category": "question",
+      "split": "development",
+      "text": "Does SwiftUI support PencilKit on iPadOS 26? Check current docs.",
+      "expectedRoute": "web_research",
+      "useful": true,
+      "image": "images/question-01.png",
+      "provenance": "synthetic-font-Caveat-not-human-handwriting"
+    },
+    {
+      "id": "question-02",
+      "category": "question",
+      "split": "development",
+      "text": "What is the current PostgreSQL release?",
+      "expectedRoute": "web_research",
+      "useful": true,
+      "image": "images/question-02.png",
+      "provenance": "synthetic-font-Caveat-not-human-handwriting"
+    },
+    {
+      "id": "question-03",
+      "category": "question",
+      "split": "heldout",
+      "text": "Does Stripe Checkout support metered billing now?",
+      "expectedRoute": "web_research",
+      "useful": true,
+      "image": "images/question-03.png",
+      "provenance": "synthetic-font-Caveat-not-human-handwriting"
+    },
+    {
+      "id": "question-04",
+      "category": "question",
+      "split": "heldout",
+      "text": "Find current official docs for WebAuthn passkeys.",
+      "expectedRoute": "web_research",
+      "useful": true,
+      "image": "images/question-04.png",
+      "provenance": "synthetic-font-Caveat-not-human-handwriting"
+    },
+    {
+      "id": "explanation-01",
+      "category": "explanation",
+      "split": "development",
+      "text": "Explain a database index in plain words.",
+      "expectedRoute": "quick_response",
+      "useful": true,
+      "image": "images/explanation-01.png",
+      "provenance": "synthetic-font-Caveat-not-human-handwriting"
+    },
+    {
+      "id": "explanation-02",
+      "category": "explanation",
+      "split": "development",
+      "text": "Why does binary search need sorted data?",
+      "expectedRoute": "quick_response",
+      "useful": true,
+      "image": "images/explanation-02.png",
+      "provenance": "synthetic-font-Caveat-not-human-handwriting"
+    },
+    {
+      "id": "explanation-03",
+      "category": "explanation",
+      "split": "heldout",
+      "text": "Explain the difference between a stack and a queue.",
+      "expectedRoute": "quick_response",
+      "useful": true,
+      "image": "images/explanation-03.png",
+      "provenance": "synthetic-font-Caveat-not-human-handwriting"
+    },
+    {
+      "id": "explanation-04",
+      "category": "explanation",
+      "split": "heldout",
+      "text": "Summarise this: cache reads are fast; writes invalidate the cache.",
+      "expectedRoute": "quick_response",
+      "useful": true,
+      "image": "images/explanation-04.png",
+      "provenance": "synthetic-font-Caveat-not-human-handwriting"
+    },
+    {
+      "id": "past_decision-01",
+      "category": "past_decision",
+      "split": "development",
+      "text": "What did we decide last meeting about offline storage?",
+      "expectedRoute": "recall",
+      "useful": true,
+      "image": "images/past_decision-01.png",
+      "provenance": "synthetic-font-Caveat-not-human-handwriting"
+    },
+    {
+      "id": "past_decision-02",
+      "category": "past_decision",
+      "split": "development",
+      "text": "Which cache policy did we choose in our earlier notes?",
+      "expectedRoute": "recall",
+      "useful": true,
+      "image": "images/past_decision-02.png",
+      "provenance": "synthetic-font-Caveat-not-human-handwriting"
+    },
+    {
+      "id": "past_decision-03",
+      "category": "past_decision",
+      "split": "heldout",
+      "text": "Why did we reject polling in the previous meeting?",
+      "expectedRoute": "recall",
+      "useful": true,
+      "image": "images/past_decision-03.png",
+      "provenance": "synthetic-font-Caveat-not-human-handwriting"
+    },
+    {
+      "id": "past_decision-04",
+      "category": "past_decision",
+      "split": "heldout",
+      "text": "What retention window did we agree on last week?",
+      "expectedRoute": "recall",
+      "useful": true,
+      "image": "images/past_decision-04.png",
+      "provenance": "synthetic-font-Caveat-not-human-handwriting"
+    },
+    {
+      "id": "ordinary-01",
+      "category": "ordinary",
+      "split": "development",
+      "text": "Meeting note: send the agenda on Friday.",
+      "expectedRoute": "none",
+      "useful": false,
+      "image": "images/ordinary-01.png",
+      "provenance": "synthetic-font-Caveat-not-human-handwriting"
+    },
+    {
+      "id": "ordinary-02",
+      "category": "ordinary",
+      "split": "development",
+      "text": "Decision: keep SQLite for offline notes.",
+      "expectedRoute": "none",
+      "useful": false,
+      "image": "images/ordinary-02.png",
+      "provenance": "synthetic-font-Caveat-not-human-handwriting"
+    },
+    {
+      "id": "ordinary-03",
+      "category": "ordinary",
+      "split": "heldout",
+      "text": "Agenda: budget? timing? owners? These are headings only.",
+      "expectedRoute": "none",
+      "useful": false,
+      "image": "images/ordinary-03.png",
+      "provenance": "synthetic-font-Caveat-not-human-handwriting"
+    },
+    {
+      "id": "ordinary-04",
+      "category": "ordinary",
+      "split": "heldout",
+      "text": "Cache TTL = 20 seconds. Owner: Sam. Review on Friday.",
+      "expectedRoute": "none",
+      "useful": false,
+      "image": "images/ordinary-04.png",
+      "provenance": "synthetic-font-Caveat-not-human-handwriting"
+    },
+    {
+      "id": "negation-01",
+      "category": "negation",
+      "split": "development",
+      "text": "Do not research billing. Keep the current checkout flow.",
+      "expectedRoute": "none",
+      "useful": false,
+      "image": "images/negation-01.png",
+      "provenance": "synthetic-font-Caveat-not-human-handwriting"
+    },
+    {
+      "id": "negation-02",
+      "category": "negation",
+      "split": "development",
+      "text": "No explanation needed. This is a reminder to update the diagram.",
+      "expectedRoute": "none",
+      "useful": false,
+      "image": "images/negation-02.png",
+      "provenance": "synthetic-font-Caveat-not-human-handwriting"
+    },
+    {
+      "id": "negation-03",
+      "category": "negation",
+      "split": "heldout",
+      "text": "Do not answer this question: does the API support streaming?",
+      "expectedRoute": "none",
+      "useful": false,
+      "image": "images/negation-03.png",
+      "provenance": "synthetic-font-Caveat-not-human-handwriting"
+    },
+    {
+      "id": "negation-04",
+      "category": "negation",
+      "split": "heldout",
+      "text": "We are not asking for research or advice. Record the decision only.",
+      "expectedRoute": "none",
+      "useful": false,
+      "image": "images/negation-04.png",
+      "provenance": "synthetic-font-Caveat-not-human-handwriting"
+    },
+    {
+      "id": "incomplete-01",
+      "category": "incomplete",
+      "split": "development",
+      "text": "Can it do the",
+      "expectedRoute": "clarify",
+      "useful": false,
+      "image": "images/incomplete-01.png",
+      "provenance": "synthetic-font-Caveat-not-human-handwriting"
+    },
+    {
+      "id": "incomplete-02",
+      "category": "incomplete",
+      "split": "development",
+      "text": "Explain why the",
+      "expectedRoute": "clarify",
+      "useful": false,
+      "image": "images/incomplete-02.png",
+      "provenance": "synthetic-font-Caveat-not-human-handwriting"
+    },
+    {
+      "id": "incomplete-03",
+      "category": "incomplete",
+      "split": "heldout",
+      "text": "What about that thing from",
+      "expectedRoute": "clarify",
+      "useful": false,
+      "image": "images/incomplete-03.png",
+      "provenance": "synthetic-font-Caveat-not-human-handwriting"
+    },
+    {
+      "id": "incomplete-04",
+      "category": "incomplete",
+      "split": "heldout",
+      "text": "Does the new",
+      "expectedRoute": "clarify",
+      "useful": false,
+      "image": "images/incomplete-04.png",
+      "provenance": "synthetic-font-Caveat-not-human-handwriting"
+    }
+  ]
+}

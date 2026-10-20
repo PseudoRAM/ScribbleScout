@@ -5,7 +5,7 @@ final class DemoAssistanceTests: XCTestCase {
     @MainActor
     func testFictionalResearchInsertEditAndReopen() throws {
         let app = XCUIApplication()
-        app.launchArguments = []
+        app.launchArguments = ["--offline-demo"]
         app.launch()
         app.buttons["Open notebook"].tap()
         app.buttons["newNote"].tap()
@@ -38,6 +38,23 @@ final class DemoAssistanceTests: XCTestCase {
         app.buttons["Page options"].tap()
         app.buttons["Redo ink"].tap()
         XCTAssertTrue(edit.waitForExistence(timeout: 5))
+        app.buttons["Select"].tap()
+        let originalFrame = edit.frame
+        let grab = edit.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 1))
+            .withOffset(CGVector(dx: -100, dy: 40))
+        grab.press(forDuration: 0.1,
+                   thenDragTo: grab.withOffset(CGVector(dx: 70, dy: 60)),
+                   withVelocity: .slow, thenHoldForDuration: 0.1)
+        XCTAssertEqual(edit.frame.minX, originalFrame.minX + 70, accuracy: 4)
+        XCTAssertEqual(edit.frame.minY, originalFrame.minY + 60, accuracy: 4)
+        app.buttons["Undo ink"].tap()
+        XCTAssertEqual(edit.frame.minX, originalFrame.minX, accuracy: 4)
+        XCTAssertEqual(edit.frame.minY, originalFrame.minY, accuracy: 4)
+        app.buttons["Page options"].tap()
+        app.buttons["Redo ink"].tap()
+        XCTAssertEqual(edit.frame.minX, originalFrame.minX + 70, accuracy: 4)
+        XCTAssertEqual(edit.frame.minY, originalFrame.minY + 60, accuracy: 4)
+        app.buttons["Pen"].tap()
         let inserted = XCTAttachment(screenshot: app.screenshot())
         inserted.name = "Fictional research inserted as a separate AI block"
         inserted.lifetime = .keepAlways
@@ -58,6 +75,106 @@ final class DemoAssistanceTests: XCTestCase {
         XCTAssertTrue(app.textViews["aiBlockText"].waitForExistence(timeout: 5))
         XCTAssertTrue((app.textViews["aiBlockText"].value as? String ?? "").contains("Reviewed for the fictional demo."))
         XCTAssertTrue(app.staticTexts["Original evidence"].exists)
+    }
+
+    @MainActor
+    func testDatedRecallOpensRegionAndReturnsToOriginalEditor() throws {
+        let app = XCUIApplication()
+        app.launch()
+        app.buttons["Open notebook"].tap()
+        app.buttons["newNote"].tap()
+        let originalTitle = app.textFields["noteTitle"].value as? String
+        app.buttons["Page options"].tap()
+        app.buttons["Recall dated meetings"].tap()
+        let source = app.buttons["openRecallSource"].firstMatch
+        reveal(source, in: app)
+        XCTAssertTrue(source.waitForExistence(timeout: 10))
+        source.tap()
+        XCTAssertTrue(app.buttons["Return to Recall"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Show source region"].exists)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Dated fictional meeting with cited region highlighted"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        app.buttons["Return to Recall"].tap()
+        XCTAssertTrue(app.navigationBars["Ask Scout"].waitForExistence(timeout: 5))
+        app.buttons["Done"].tap()
+        XCTAssertEqual(app.textFields["noteTitle"].value as? String, originalTitle)
+        XCTAssertTrue(app.buttons["Ask Scout"].exists)
+    }
+
+    @MainActor
+    func testCanvasResponseCardWithLargeTextAndDarkMode() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--offline-demo", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-AppleInterfaceStyle", "Dark"]
+        app.launch()
+        app.buttons["Open notebook"].tap()
+        app.buttons["newNote"].tap()
+        app.buttons["Ask Scout"].tap()
+        let question = app.descendants(matching: .any).matching(identifier: "scoutQuestion").firstMatch
+        XCTAssertTrue(question.waitForExistence(timeout: 5))
+        question.tap()
+        question.typeText("Explain a database index.")
+        let route = app.buttons["askScout"]
+        reveal(route, in: app)
+        route.tap()
+        let answer = app.buttons["Write a quick answer"]
+        reveal(answer, in: app)
+        XCTAssertTrue(answer.waitForExistence(timeout: 5))
+        answer.tap()
+        app.buttons["Done"].tap()
+        let card = app.descendants(matching: .any).matching(identifier: "scoutResponseCard").firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 5))
+        let scroll = app.scrollViews["scoutResponseScroll"]
+        let end = app.staticTexts["scoutResponseEnd"]
+        XCTAssertTrue(scroll.waitForExistence(timeout: 5))
+        for _ in 0..<12 {
+            if end.isHittable && end.frame.maxY <= scroll.frame.maxY { break }
+            scroll.swipeUp()
+        }
+        XCTAssertTrue(end.isHittable, "The final caveat must be reachable by scrolling")
+        XCTAssertLessThanOrEqual(end.frame.maxY, scroll.frame.maxY + 2)
+        XCTAssertTrue(app.buttons["insertCanvasAIBlock"].isHittable)
+        let portrait = XCTAttachment(screenshot: app.screenshot())
+        portrait.name = "Scout canvas response · large text dark portrait"
+        portrait.lifetime = .keepAlways
+        add(portrait)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        XCTAssertTrue(app.buttons["assistancePin"].isHittable)
+        let landscape = XCTAttachment(screenshot: app.screenshot())
+        landscape.name = "Scout canvas response · large text dark landscape"
+        landscape.lifetime = .keepAlways
+        add(landscape)
+        XCTAssertTrue(app.buttons["insertCanvasAIBlock"].isHittable)
+        app.buttons["insertCanvasAIBlock"].tap()
+        XCTAssertFalse(card.exists)
+        let edit = app.buttons["editAIBlock"].firstMatch
+        XCTAssertTrue(edit.waitForExistence(timeout: 5))
+        app.buttons["Undo ink"].tap()
+        XCTAssertFalse(edit.exists, "Canvas insertion must share the inspector’s one-step undo")
+    }
+
+    @MainActor
+    func testScoutStatusExplainsProcessingAndLetsYouChangeMode() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--offline-demo"]
+        app.launch()
+        app.buttons["Open notebook"].tap()
+        app.buttons["newNote"].tap()
+        let status = app.buttons["scoutStatus"]
+        XCTAssertTrue(status.waitForExistence(timeout: 5))
+        status.tap()
+        XCTAssertTrue(app.staticTexts["scoutStatusExplanation"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["scoutStatusExplanation"].label.contains("does not record audio"))
+        let mode = app.buttons["modePicker"]
+        reveal(mode, in: app)
+        mode.tap()
+        app.buttons["Automatic"].tap()
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["Pause automatic Scout"].waitForExistence(timeout: 5))
+        app.buttons["Pause automatic Scout"].tap()
+        XCTAssertFalse(app.buttons["Pause automatic Scout"].exists)
     }
 
     @MainActor

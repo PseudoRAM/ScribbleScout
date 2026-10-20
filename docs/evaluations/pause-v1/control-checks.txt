@@ -1,0 +1,20 @@
+Test Suite 'ScribbleScoutTests.xctest' passed at 2026-10-20 13:54:15.509.
+Test Suite 'Selected tests' passed at 2026-10-20 13:54:15.509.
+✔ Test sourceEditedDuringAnswerCannotBeAccepted() passed after 0.005 seconds.
+✔ Test offlineStaleScenarioCannotBeInsertedEvenWithUnchangedInk() passed after 0.001 seconds.
+✔ Test followUpRetainsOriginalQuestionAndParentRequest() passed after 0.001 seconds.
+✔ Test cancelledProviderThatIgnoresCancellationCannotPublishItsAnswer() passed after 0.001 seconds.
+✔ Test explicitDraftPreemptsAutomaticRecognitionEvenWhenOldProviderFinishes() passed after 0.032 seconds.
+✔ Test automaticWorkKeepsOnlyLatestQueuedRegion() passed after 0.004 seconds.
+✔ Test dismissedEquivalentTopicIsSuppressedAcrossChangedSourceHashes() passed after 0.004 seconds.
+✔ Test explicitAnswerOwnsAutomaticResultAndPreventsLaterPauseFromReplacingIt() passed after 0.003 seconds.
+✔ Test queuedSourceInvalidatedBeforeDrainIsNeverUploadedForRecognition() passed after 0.002 seconds.
+​✔ Test nonAutomaticModesDoNotCaptureOrUpload(mode:) with 2 test cases passed after 0.020 seconds.
+✔ Test defaultCooldownDropsNewPauseAndExplicitRequestStillRuns() passed after 0.002 seconds.
+✔ Test mutedTopicRecognisesButDoesNotRouteAgain() passed after 0.003 seconds.
+✔ Test automaticResearchRouteWaitsForSeparatelyReviewedPublicQuestion() passed after 0.001 seconds.
+✔ Test ordinaryWritingShowsBusyPinBeforeSilentRouteCompletes() passed after 0.001 seconds.
+​✔ Test nonAssistanceAndPrivateRecallLeaveNoCanvasSuggestion(route:) with 2 test cases passed after 0.006 seconds.
+✔ Suite "Assistance coordination" passed after 0.096 seconds.
+✔ Test run with 15 tests in 1 suite passed after 0.097 seconds.
+** TEST SUCCEEDED **

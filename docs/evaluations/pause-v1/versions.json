@@ -1,0 +1,18 @@
+{
+  "appCommit": "dfc4b8f72c0481370de11de751ed8417987aec6b",
+  "appVersion": "0.1.0",
+  "appBuild": "1",
+  "xcode": "26.2 (17C52)",
+  "simulator": "iPad mini (A17 Pro), iOS 26.2",
+  "liveRunDevice": "macOS image diagnostic, not an iPad session",
+  "productionChangesByThisEvaluation": false,
+  "sourcesAtAppCommit": {
+    "ScribbleScout/AssistanceCoordinator.swift": "031b6a26f5513ac9f28ce97c1c911af4209a5d1d640976356196a851a6cf553f",
+    "ScribbleScout/AssistanceCanvasOverlay.swift": "b414bd355758f9e7bfd34f506330067db67ae333873cdc32f3f86bc1ce98c579",
+    "ScribbleScout/InkCanvas.swift": "d578637ce40206b13621a231dfc97208b7d8b2b954559a5ecd0cc5362b71f0f7",
+    "ScribbleScout/Models/OpenAIAssistance.swift": "7919e489dae06d7fad529668906784ab7596f04fa7579ef9194d383ffe86f4f7"
+  },
+  "coordinatorTestSHA256": "a97179fd742718c440d85b0ec70044f5e6f8d27723793528cdf532be5e7458e1",
+  "inputsPreparedUTC": "2026-10-20T02:51:54.879424+00:00",
+  "fontSHA256": "0bdb6b660482d31531b3945849fba5916b3ef8695da7024a9e6b9ee3c4157988"
+}

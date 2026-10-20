@@ -30,6 +30,10 @@ struct Evidence: Codable, Equatable, Sendable, Identifiable {
     var meetingDate: Date? = nil
     var canvasID: UUID? = nil
     var bounds: CanvasBounds? = nil
+    var revision: Int? = nil
+    var claim: String? = nil
+    var isFictional: Bool? = nil
+    var canvasBounds: CanvasBounds? = nil
     var isValid: Bool {
         guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         switch kind {

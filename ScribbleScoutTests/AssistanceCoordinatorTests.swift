@@ -6,6 +6,176 @@ import UIKit
 @Suite("Assistance coordination", .serialized)
 @MainActor
 struct AssistanceCoordinatorTests {
+    private func fixtureSettings() -> ScoutSession {
+        let settings = ScoutSession(apiKey: "")
+        settings.offline = true
+        settings.mode = .explicit
+        return settings
+    }
+    // These existing tests isolate recognition/routing queue behavior from answer generation.
+    private func recognitionOnlyCoordinator() -> AssistanceCoordinator {
+        let coordinator = AssistanceCoordinator()
+        coordinator.automaticallyAnswer = false
+        return coordinator
+    }
+
+    @Test
+    func runtimeKeyEnablesLiveAutomaticProcessingAndForgetStopsIt() {
+        let settings = ScoutSession(apiKey: "synthetic-key")
+        #expect(settings.canProcess && settings.consent && !settings.offline)
+        #expect(settings.mode == .automatic)
+        settings.forgetKey()
+        #expect(!settings.canProcess)
+        settings.apiKey = "replacement-synthetic-key"
+        #expect(settings.canProcess && !settings.offline && settings.mode == .automatic)
+        settings.consent = false
+        #expect(!settings.canProcess)
+        let absent = ScoutSession(apiKey: "")
+        #expect(!absent.offline && !absent.canProcess)
+    }
+
+    @Test
+    func automaticClearQuestionStreamsAnswerAndCancellationRejectsLateChunks() async {
+        let settings = fixtureSettings()
+        settings.mode = .automatic
+        let provider = ControlledProvider(held: [.answer], recognitionText: "Explain a database index")
+        let coordinator = AssistanceCoordinator()
+        coordinator.pauseDelay = .zero
+        coordinator.providerFactory = { _ in provider }
+        coordinator.resolveSource = { $0 }
+        coordinator.schedulePause(using: settings) { selection(region()) }
+        await provider.waitForCalls(3)
+        #expect(coordinator.busy)
+        #expect(coordinator.streamingText == "An index")
+        #expect(!coordinator.canInsert)
+        coordinator.cancel()
+        await provider.release(.answer)
+        await nextMainTurn()
+        #expect(coordinator.streamingText.isEmpty)
+        #expect(coordinator.suggestion?.state != .ready)
+    }
+
+    @Test
+    func automaticResearchUsesRecognizedQuestionAndTracksWorkPhases() async {
+        let settings = fixtureSettings()
+        settings.mode = .automatic
+        let provider = ControlledProvider(held: [.route, .answer], route: .webResearch,
+                                          recognitionText: "What are the current database options?")
+        let coordinator = AssistanceCoordinator()
+        coordinator.pauseDelay = .zero
+        coordinator.providerFactory = { _ in provider }
+        coordinator.resolveSource = { $0 }
+        coordinator.schedulePause(using: settings) { selection(region()) }
+        await provider.waitForCalls(2)
+        #expect(coordinator.workPhase == .deciding)
+        #expect(coordinator.workPhase?.isAction == false)
+        await provider.release(.route)
+        await provider.waitForCalls(3)
+        #expect(coordinator.workPhase == .researching)
+        #expect(coordinator.workPhase?.isAction == true)
+        #expect(await provider.answeredText == coordinator.transcript)
+        #expect(await provider.answeredWithResearch)
+        #expect(await provider.answeredWithImage == false)
+        await idle(coordinator) { Task { await provider.release(.answer) } }
+        #expect(coordinator.workPhase == nil)
+        #expect(coordinator.suggestion?.state == .ready)
+    }
+
+    @Test
+    func automaticRecallSearchesLocalNotesWithoutAnAnswerRequest() async {
+        let settings = fixtureSettings()
+        settings.mode = .automatic
+        let provider = ControlledProvider(route: .recall, recognitionText: "What did we decide last meeting?")
+        let coordinator = AssistanceCoordinator()
+        coordinator.pauseDelay = .zero
+        coordinator.providerFactory = { _ in provider }
+        coordinator.resolveSource = { $0 }
+        var searched = ""
+        var phase: AssistanceCoordinator.WorkPhase?
+        coordinator.recallSearch = { query in
+            searched = query
+            phase = coordinator.workPhase
+            return [Evidence(kind: .note, title: "Last meeting", excerpt: "Validate trials first.",
+                             canvasID: UUID(), bounds: CanvasBounds(x: 0, y: 0, width: 100, height: 100))]
+        }
+        coordinator.schedulePause(using: settings) { selection(region()) }
+        await provider.waitForCalls(2)
+        await nextMainTurn()
+        #expect(searched == coordinator.transcript)
+        #expect(phase == .recalling)
+        #expect(coordinator.workPhase == nil)
+        #expect(coordinator.suggestion?.request.sourceMode == .notes)
+        #expect(coordinator.suggestion?.state == .ready)
+        #expect(await provider.callCount == 2)
+    }
+
+    @Test
+    func automaticAnswerCompletesWithoutInspectorAndSourceChangesClearPartialText() async {
+        let settings = fixtureSettings()
+        settings.mode = .automatic
+        let provider = ControlledProvider(held: [.answer], recognitionText: "Explain a database index")
+        let coordinator = AssistanceCoordinator()
+        coordinator.pauseDelay = .zero
+        var valid = true
+        coordinator.providerFactory = { _ in provider }
+        coordinator.resolveSource = { valid ? $0 : nil }
+        coordinator.schedulePause(using: settings) { selection(region()) }
+        await provider.waitForCalls(3)
+        #expect(coordinator.streamingText == "An index")
+        valid = false
+        #expect(!coordinator.validate())
+        #expect(coordinator.streamingText.isEmpty)
+        await idle(coordinator) { Task { await provider.release(.answer) } }
+        #expect(coordinator.suggestion?.state == .stale)
+        #expect(!coordinator.canInsert)
+    }
+
+    @Test(arguments: [AssistanceRoute.none, .clarify])
+    func automaticDecisionWithholdsResponseWithoutAnAction(route: AssistanceRoute) async {
+        let settings = fixtureSettings()
+        settings.mode = .automatic
+        let provider = ControlledProvider(held: [.route], route: route, recognitionText: "Notes about the next meeting")
+        let coordinator = AssistanceCoordinator()
+        coordinator.pauseDelay = .zero
+        coordinator.providerFactory = { _ in provider }
+        coordinator.resolveSource = { $0 }
+        coordinator.schedulePause(using: settings) { selection(region()) }
+        await provider.waitForCalls(2)
+        #expect(!coordinator.showsCanvasResponse, "Reading and Decisions must not open a response card")
+        await idle(coordinator) { Task { await provider.release(.route) } }
+        #expect(!coordinator.showsCanvasResponse)
+        #expect(await provider.callCount == 2, "No answer or research request for ordinary or incomplete notes")
+        #expect(!coordinator.canInsert)
+        if route == .clarify {
+            #expect(coordinator.region != nil, "Clarification remains available through Review")
+            #expect(coordinator.message != nil)
+        }
+    }
+
+    @Test
+    func explicitClarificationRemainsVisibleAndAutomaticAnswerCanBeInserted() async {
+        let settings = fixtureSettings()
+        let coordinator = AssistanceCoordinator()
+        coordinator.resolveSource = { $0 }
+        coordinator.providerFactory = { _ in ControlledProvider(route: .clarify) }
+        coordinator.prepare(nil, region: region("Explain…"))
+        await idle(coordinator) { coordinator.route(using: settings) }
+        #expect(coordinator.showsCanvasResponse)
+        coordinator.dismissSuggestion()
+
+        settings.mode = .automatic
+        let provider = ControlledProvider(held: [.answer], recognitionText: "Explain a database index")
+        coordinator.providerFactory = { _ in provider }
+        coordinator.pauseDelay = .zero
+        coordinator.schedulePause(using: settings) { selection(region()) }
+        await provider.waitForCalls(3)
+        #expect(coordinator.showsCanvasResponse, "An actionable decision may show streaming text")
+        #expect(!coordinator.canInsert, "Partial text cannot be accepted")
+        await idle(coordinator) { Task { await provider.release(.answer) } }
+        #expect(coordinator.showsCanvasResponse)
+        #expect(coordinator.canInsert)
+    }
+
     private func region(_ text: String = "Explain this decision") -> NoteRegion {
         NoteRegion(canvasID: UUID(), revision: 1, bounds: CanvasBounds(x: 20, y: 30, width: 200, height: 100),
                    recognisedText: text, sourceHash: UUID().uuidString)
@@ -20,7 +190,7 @@ struct AssistanceCoordinatorTests {
     private func idle(_ coordinator: AssistanceCoordinator, action: () -> Void) async {
         await withCheckedContinuation { continuation in
             var observer: AnyCancellable?
-            observer = coordinator.$activity.dropFirst().filter { $0 == nil }.first().sink { _ in
+            observer = coordinator.$activity.drop(while: { $0 == nil }).filter { $0 == nil }.first().sink { _ in
                 observer?.cancel(); continuation.resume()
             }
             action()
@@ -32,8 +202,8 @@ struct AssistanceCoordinatorTests {
 
     @Test
     func askSelectionStartsRecognitionWithCanvasContextWithoutAnotherTap() async {
-        let settings = ScoutSession()
-        let coordinator = AssistanceCoordinator()
+        let settings = fixtureSettings()
+        let coordinator = recognitionOnlyCoordinator()
         let provider = ControlledProvider(held: [.recognition])
         coordinator.resolveSource = { $0 }
         coordinator.providerFactory = { _ in provider }
@@ -49,10 +219,47 @@ struct AssistanceCoordinatorTests {
     }
 
     @Test
+    func localRecallNeedsNoProviderAndCombinedResearchSendsOnlyPublicQuestion() async throws {
+        let settings = fixtureSettings()
+        settings.mode = .off
+        let provider = ControlledProvider()
+        let coordinator = recognitionOnlyCoordinator()
+        coordinator.resolveSource = { $0 }
+        coordinator.providerFactory = { _ in provider }
+        let source = region("Private project codename: secret. What did our previous meetings decide?")
+        let selected = selection(source)
+        let notes = NoteRecord.fictionalMeetings.prefix(2).flatMap { $0.meetingEvidence ?? [] }
+        coordinator.recallSearch = { query in
+            #expect(query.contains("secret"))
+            return notes
+        }
+        coordinator.prepare(selected, region: source)
+        coordinator.transcript = source.recognisedText
+        await idle(coordinator) { coordinator.recall() }
+        #expect(await provider.callCount == 0)
+        #expect(coordinator.suggestion?.request.sourceMode == .notes)
+        #expect(coordinator.canInsert)
+        #expect(coordinator.suggestion?.answer.contains("Assumption") == true)
+        #expect(coordinator.suggestion?.answer.contains("Settled decision") == true)
+        #expect(coordinator.selection?.region == selected.region)
+        #expect(coordinator.region == source)
+
+        settings.mode = .explicit
+        coordinator.publicQuestion = "What payment flows support annual subscriptions?"
+        await idle(coordinator) { coordinator.answer(using: settings, research: true) }
+        #expect(await provider.answeredText == coordinator.publicQuestion)
+        #expect(await provider.answeredWithImage == false)
+        #expect(await provider.answeredWithResearch == true)
+        #expect(coordinator.suggestion?.request.sourceMode == .both)
+        #expect(coordinator.suggestion?.evidence.filter { $0.kind == .note } == notes)
+        #expect(coordinator.canInsert)
+    }
+
+    @Test
     func sourceEditedDuringAnswerCannotBeAccepted() async throws {
-        let settings = ScoutSession()
+        let settings = fixtureSettings()
         let provider = ControlledProvider(held: [.answer])
-        let coordinator = AssistanceCoordinator()
+        let coordinator = recognitionOnlyCoordinator()
         coordinator.providerFactory = { _ in provider }
         var sourceExists = true
         coordinator.resolveSource = { sourceExists ? $0 : nil }
@@ -69,9 +276,9 @@ struct AssistanceCoordinatorTests {
 
     @Test
     func offlineStaleScenarioCannotBeInsertedEvenWithUnchangedInk() async {
-        let settings = ScoutSession()
+        let settings = fixtureSettings()
         settings.scenario = .stale
-        let coordinator = AssistanceCoordinator()
+        let coordinator = recognitionOnlyCoordinator()
         coordinator.resolveSource = { $0 }
         coordinator.prepare(nil, region: region())
         coordinator.publicQuestion = "A fictional public question"
@@ -83,8 +290,8 @@ struct AssistanceCoordinatorTests {
 
     @Test
     func followUpRetainsOriginalQuestionAndParentRequest() async throws {
-        let settings = ScoutSession()
-        let coordinator = AssistanceCoordinator()
+        let settings = fixtureSettings()
+        let coordinator = recognitionOnlyCoordinator()
         coordinator.resolveSource = { $0 }
         coordinator.prepare(nil, region: region("Explain a retention window"))
         await idle(coordinator) { coordinator.answer(using: settings, research: false) }
@@ -98,9 +305,9 @@ struct AssistanceCoordinatorTests {
 
     @Test
     func cancelledProviderThatIgnoresCancellationCannotPublishItsAnswer() async {
-        let settings = ScoutSession()
+        let settings = fixtureSettings()
         let provider = ControlledProvider(held: [.answer])
-        let coordinator = AssistanceCoordinator()
+        let coordinator = recognitionOnlyCoordinator()
         coordinator.providerFactory = { _ in provider }
         coordinator.resolveSource = { $0 }
         coordinator.prepare(nil, region: region())
@@ -117,10 +324,10 @@ struct AssistanceCoordinatorTests {
 
     @Test
     func explicitDraftPreemptsAutomaticRecognitionEvenWhenOldProviderFinishes() async {
-        let settings = ScoutSession()
+        let settings = fixtureSettings()
         settings.mode = .automatic
         let provider = ControlledProvider(held: [.recognition])
-        let coordinator = AssistanceCoordinator()
+        let coordinator = recognitionOnlyCoordinator()
         coordinator.providerFactory = { _ in provider }
         coordinator.resolveSource = { $0 }
         let automaticSelection = selection(region("Automatic handwriting"))
@@ -141,10 +348,10 @@ struct AssistanceCoordinatorTests {
 
     @Test
     func automaticWorkKeepsOnlyLatestQueuedRegion() async {
-        let settings = ScoutSession()
+        let settings = fixtureSettings()
         settings.mode = .automatic
         let provider = ControlledProvider(held: [.recognition])
-        let coordinator = AssistanceCoordinator()
+        let coordinator = recognitionOnlyCoordinator()
         coordinator.pauseDelay = .zero
         coordinator.automaticCooldown = 0
         coordinator.providerFactory = { _ in provider }
@@ -170,10 +377,10 @@ struct AssistanceCoordinatorTests {
 
     @Test
     func dismissedEquivalentTopicIsSuppressedAcrossChangedSourceHashes() async {
-        let settings = ScoutSession()
+        let settings = fixtureSettings()
         settings.mode = .automatic
         let provider = ControlledProvider(recognitionText: "Explain TLS security")
-        let coordinator = AssistanceCoordinator()
+        let coordinator = recognitionOnlyCoordinator()
         coordinator.pauseDelay = .zero
         coordinator.automaticCooldown = 0
         coordinator.providerFactory = { _ in provider }
@@ -194,10 +401,10 @@ struct AssistanceCoordinatorTests {
 
     @Test
     func explicitAnswerOwnsAutomaticResultAndPreventsLaterPauseFromReplacingIt() async {
-        let settings = ScoutSession()
+        let settings = fixtureSettings()
         settings.mode = .automatic
         let provider = ControlledProvider(held: [.answer])
-        let coordinator = AssistanceCoordinator()
+        let coordinator = recognitionOnlyCoordinator()
         coordinator.pauseDelay = .zero
         coordinator.automaticCooldown = 0
         coordinator.providerFactory = { _ in provider }
@@ -222,10 +429,10 @@ struct AssistanceCoordinatorTests {
 
     @Test
     func queuedSourceInvalidatedBeforeDrainIsNeverUploadedForRecognition() async {
-        let settings = ScoutSession()
+        let settings = fixtureSettings()
         settings.mode = .automatic
         let provider = ControlledProvider(held: [.recognition])
-        let coordinator = AssistanceCoordinator()
+        let coordinator = recognitionOnlyCoordinator()
         coordinator.pauseDelay = .zero
         coordinator.automaticCooldown = 0
         coordinator.providerFactory = { _ in provider }
@@ -247,11 +454,137 @@ struct AssistanceCoordinatorTests {
         #expect(!coordinator.busy)
     }
 
-    @Test(arguments: [AssistanceRoute.none, .recall])
-    func nonAssistanceAndPrivateRecallLeaveNoCanvasSuggestion(route: AssistanceRoute) async {
-        let settings = ScoutSession()
+    @Test(arguments: [ScoutSession.Mode.off, .explicit])
+    func nonAutomaticModesDoNotCaptureOrUpload(mode: ScoutSession.Mode) async {
+        let settings = fixtureSettings()
+        settings.mode = mode
+        let provider = ControlledProvider()
+        let coordinator = recognitionOnlyCoordinator()
+        coordinator.pauseDelay = .zero
+        coordinator.providerFactory = { _ in provider }
+        var captures = 0
+        coordinator.schedulePause(using: settings) { captures += 1; return nil }
+        await nextMainTurn()
+        #expect(captures == 0)
+        #expect(await provider.callCount == 0)
+    }
+
+    @Test
+    func defaultCooldownDropsNewPauseAndExplicitRequestStillRuns() async {
+        let settings = fixtureSettings()
+        settings.mode = .automatic
+        let provider = ControlledProvider()
+        let coordinator = recognitionOnlyCoordinator()
+        coordinator.pauseDelay = .zero
+        coordinator.providerFactory = { _ in provider }
+        coordinator.resolveSource = { $0 }
+        #expect(coordinator.automaticCooldown == 20)
+        let first = selection(region())
+        coordinator.schedulePause(using: settings) { first }
+        await provider.waitForCalls(2)
+        await nextMainTurn()
+        var captures = 0
+        coordinator.schedulePause(using: settings) { captures += 1; return first }
+        await nextMainTurn()
+        #expect(captures == 0)
+        #expect(await provider.callCount == 2)
+        coordinator.prepare(nil, region: region("Explicit request during cooldown"))
+        await idle(coordinator) { coordinator.route(using: settings) }
+        #expect(await provider.callCount == 3)
+        #expect(coordinator.transcript == "Explicit request during cooldown")
+    }
+
+    @Test
+    func mutedTopicRecognisesButDoesNotRouteAgain() async {
+        let settings = fixtureSettings()
+        settings.mode = .automatic
+        let provider = ControlledProvider(recognitionText: "Explain TLS security")
+        let coordinator = recognitionOnlyCoordinator()
+        coordinator.pauseDelay = .zero
+        coordinator.automaticCooldown = 0
+        coordinator.providerFactory = { _ in provider }
+        coordinator.resolveSource = { $0 }
+        let first = selection(region())
+        coordinator.schedulePause(using: settings) { first }
+        await provider.waitForCalls(2)
+        await nextMainTurn()
+        coordinator.mute()
+        let second = selection(region())
+        coordinator.schedulePause(using: settings) { second }
+        await provider.waitForCalls(3)
+        await nextMainTurn()
+        #expect(coordinator.region == nil)
+        #expect(coordinator.suggestion == nil)
+        #expect(await provider.callCount == 3)
+    }
+
+    @Test
+    func automaticResearchRouteWaitsForSeparatelyReviewedPublicQuestion() async {
+        let settings = fixtureSettings()
+        settings.mode = .automatic
+        let provider = ControlledProvider(route: .webResearch)
+        let coordinator = recognitionOnlyCoordinator()
+        #expect(coordinator.pauseDelay == .milliseconds(1800))
+        coordinator.pauseDelay = .zero
+        coordinator.providerFactory = { _ in provider }
+        coordinator.resolveSource = { $0 }
+        let source = selection(region())
+        coordinator.schedulePause(using: settings) { source }
+        await provider.waitForCalls(2)
+        await nextMainTurn()
+        #expect(coordinator.stage == .review)
+        #expect(coordinator.publicQuestion.isEmpty)
+        #expect(coordinator.message?.contains("No web search has started") == true)
+        #expect(await provider.callCount == 2)
+        coordinator.answer(using: settings, research: true)
+        await nextMainTurn()
+        #expect(await provider.callCount == 2, "Blank public question must never start research")
+        #expect(!coordinator.canInsert)
+    }
+
+    @Test
+    func ordinaryWritingShowsBusyPinBeforeSilentRouteCompletes() async {
+        let settings = fixtureSettings()
+        settings.mode = .automatic
+        let provider = ControlledProvider(held: [.recognition], route: .none)
+        let coordinator = recognitionOnlyCoordinator()
+        coordinator.pauseDelay = .zero
+        coordinator.providerFactory = { _ in provider }
+        coordinator.resolveSource = { $0 }
+        let source = selection(region("Ordinary note"))
+        coordinator.schedulePause(using: settings) { source }
+        await provider.waitForCalls(1)
+        #expect(coordinator.region != nil)
+        #expect(coordinator.busy)
+        #expect(coordinator.pinTitle == "Reading handwriting…")
+        await provider.release(.recognition)
+        await provider.waitForCalls(2)
+        await nextMainTurn()
+        #expect(coordinator.region == nil)
+        #expect(coordinator.suggestion == nil)
+    }
+
+    @Test
+    func recallRoutingPreservesSourceAndWaitsForLocalSearch() async {
+        let settings = fixtureSettings()
+        let provider = ControlledProvider(route: .recall)
+        let coordinator = recognitionOnlyCoordinator()
+        coordinator.providerFactory = { _ in provider }
+        coordinator.resolveSource = { $0 }
+        let source = region()
+        coordinator.prepare(nil, region: source)
+        await idle(coordinator) { coordinator.route(using: settings) }
+        #expect(coordinator.region != nil)
+        #expect(coordinator.decision?.route == .recall)
+        #expect(!coordinator.canInsert)
+        #expect(await provider.callCount == 1)
+    }
+
+    @Test(arguments: [AssistanceRoute.none])
+    func nonAssistanceLeavesNoCanvasSuggestion(route: AssistanceRoute) async {
+        let settings = fixtureSettings()
         let provider = ControlledProvider(route: route)
-        let coordinator = AssistanceCoordinator()
+        let coordinator = recognitionOnlyCoordinator()
         coordinator.providerFactory = { _ in provider }
         coordinator.resolveSource = { $0 }
         coordinator.prepare(nil, region: region())
@@ -272,6 +605,9 @@ private actor ControlledProvider: AssistanceProvider {
     private var pending: [Operation: CheckedContinuation<Void, Never>] = [:]
     private var started: [(Int, CheckedContinuation<Void, Never>)] = []
     private(set) var callCount = 0
+    private(set) var answeredText = ""
+    private(set) var answeredWithImage = false
+    private(set) var answeredWithResearch = false
     init(held: Set<Operation> = [], route: AssistanceRoute = .quickResponse, recognitionText: String? = nil) {
         self.held = held; resultRoute = route; self.recognitionText = recognitionText
     }
@@ -303,7 +639,16 @@ private actor ControlledProvider: AssistanceProvider {
         await begin(.route)
         return RoutingDecision(route: resultRoute, confidence: 1)
     }
+    func answer(_ text: String, research: Bool, image: Data?, onText: @escaping @Sendable (String) async -> Void) async throws -> AssistanceAnswer {
+        await onText("An index")
+        let result = try await answer(text, research: research, image: image)
+        await onText(result.text)
+        return result
+    }
     func answer(_ text: String, research: Bool, image: Data?) async throws -> AssistanceAnswer {
+        answeredText = text
+        answeredWithImage = image != nil
+        answeredWithResearch = research
         await begin(.answer)
         return AssistanceAnswer(text: "Delayed answer", citations: [], evidence: [
             Evidence(kind: .fixture, title: "Test source", excerpt: "Deterministic supporting evidence")

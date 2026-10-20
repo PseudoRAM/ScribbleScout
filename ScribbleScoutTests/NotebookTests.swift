@@ -8,6 +8,23 @@ import SwiftUI
 struct NotebookTests {
     @MainActor
     @Test
+    func datedMeetingRenameRetainsBoundsAndTextEditRemovesStaleAnchors() throws {
+        try withRepository { repository in
+            let meeting = NoteRecord.fictionalMeetings[0]
+            let session = NoteSession(note: meeting, drawing: PKDrawing(), repository: repository)
+            session.edit { $0.title = "Renamed fictional meeting" }
+            #expect(session.note.meetingEvidence?.first?.title == "Renamed fictional meeting")
+            #expect(session.note.meetingEvidence?.first?.bounds == meeting.meetingEvidence?.first?.bounds)
+            #expect(session.flush())
+            let restored = try repository.load(meeting.id)
+            #expect(restored.note.meetingEvidence == session.note.meetingEvidence)
+            session.edit { $0.text = "Revised meeting content" }
+            #expect(session.note.meetingEvidence == nil)
+        }
+    }
+
+    @MainActor
+    @Test
     func testPencilCanvasIsActiveOnOpeningAndAfterClearing() throws {
         try withRepository { repository in
             let session = NoteSession(note: NoteRecord(), drawing: PKDrawing(), repository: repository)
@@ -366,6 +383,9 @@ struct NotebookTests {
             #expect(abs(center.x - point.x) < 1)
             #expect(abs(center.y - point.y) < 1)
             #expect(canvas.zoomScale == zoom)
+            #expect(canvas.contentSize.width >= canvas.contentOffset.x + canvas.bounds.width,
+                    "The drawable surface must cover the viewport beyond the original page")
+            #expect(canvas.contentSize.height >= canvas.contentOffset.y + canvas.bounds.height)
         }
         controls.addRectangle(color: .red, width: 6)
         canvas.delegate?.canvasViewDrawingDidChange?(canvas)
