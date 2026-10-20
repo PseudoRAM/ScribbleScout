@@ -2,33 +2,9 @@ import Foundation
 import PencilKit
 import SwiftUI
 
-enum PaperStyle: String, Codable, CaseIterable, Identifiable {
-    case dotted, ruled, blank
-    var id: Self { self }
-    var title: String { rawValue.capitalized }
-}
-
 /// All ink and future annotation bounds use this fixed page coordinate space.
 enum NotebookPage {
     static let size = CGSize(width: 1000, height: 1400)
-}
-
-struct PageViewport: Codable, Equatable {
-    var zoom: Double = 0 // New pages fit the available width.
-    var x: Double = 0
-    var y: Double = 0
-}
-
-struct NoteRecord: Codable, Identifiable, Equatable {
-    var id = UUID()
-    var title = "Untitled note"
-    var createdAt = Date()
-    var updatedAt = Date()
-    var text = ""
-    var paper: PaperStyle = .dotted
-    var viewport = PageViewport()
-    var drawingRevision = 0
-    var drawingFile: String?
 }
 
 struct LocalNotebook {
