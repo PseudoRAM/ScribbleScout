@@ -41,7 +41,17 @@ For S3 and S6 explicitly record whether “not” survives. For S4 check whether
 
 ## Failures and regressions
 
-No physical handwriting outcomes or reproducible app failures have been reported yet. No speculative code changes or synthetic substitutes were made. For an observed failure record sample/attempt, exact action sequence, expected/actual behavior, reproducibility, fixed commit and targeted regression evidence where practical. Revalidate fixes on the physical iPad.
+### U1 · Automatic assistance is confusing / no visible response
+
+Ben reported during the first attempted sample: “Im so confused, its not happening automatically so I toggled it to work automatically and then its still a multi step thing and im not getting any response?”
+
+Observed by Ben: no useful response visible and an unexpectedly manual flow after enabling Automatic. Exact handwriting, settings/consent state, transcript, uncertainty and timings remain unreported. This is a usability failure report, not a completed recognition-accuracy test.
+
+Inspection of the installed `dfc4b8f` source found: opening Scout without a selection prepares a typed manual region; `schedulePause` refuses automatic work while an explicit region exists; changing to Automatic does not schedule recognition until a drawing revision changes. Automatic recognition/routing also stops before answer generation and exposes a canvas pin rather than opening the inspector. These mechanisms can explain the report, but the actual on-device cause is not confirmed.
+
+Diagnostic retry requested: dismiss the current suggestion, close the inspector, write a fresh question, pause approximately two seconds and inspect any Scout pin. No replacement build or code fix has been installed. Reproduction and on-device retry result pending.
+
+For an observed failure record sample/attempt, exact action sequence, expected/actual behavior, reproducibility, fixed commit and targeted regression evidence where practical. Revalidate fixes on the physical iPad.
 
 ## Completion gate
 
