@@ -93,10 +93,10 @@ struct NotebookTests {
             #expect(canvas.drawingPolicy == .pencilOnly)
             #expect(canvas.isDrawingEnabled)
             #expect(canvas.isFirstResponder, "The startup canvas must own Pencil input")
-            canvas.drawing = drawing()
+            canvas.worldDrawing = drawing()
             canvas.delegate?.canvasViewDrawingDidChange?(canvas)
             canvas.resignFirstResponder()
-            canvas.drawing = PKDrawing()
+            canvas.worldDrawing = PKDrawing()
             canvas.delegate?.canvasViewDrawingDidChange?(canvas)
             #expect(canvas.isFirstResponder, "Clearing ink must leave Pencil input active")
         }
@@ -388,7 +388,7 @@ struct NotebookTests {
         let subscription = controls.viewport.objectWillChange.sink { overlayUpdates += 1 }
         defer { subscription.cancel() }
         for step in 1...120 {
-            canvas.contentOffset = CGPoint(x: step, y: step * 2)
+            canvas.worldOffset = CGPoint(x: step, y: step * 2)
             canvas.delegate?.scrollViewDidScroll?(canvas)
             canvas.delegate?.scrollViewDidZoom?(canvas)
         }
@@ -429,8 +429,8 @@ struct NotebookTests {
         for point in [CGPoint(x: 6000, y: 5000), CGPoint(x: -6000, y: 5000),
                       CGPoint(x: 6000, y: -5000), CGPoint(x: -6000, y: -5000)] {
             controls.navigate(to: point)
-            let center = CGPoint(x: (canvas.contentOffset.x + canvas.bounds.width / 2) / zoom,
-                                 y: (canvas.contentOffset.y + canvas.bounds.height / 2) / zoom)
+            let center = CGPoint(x: (canvas.worldOffset.x + canvas.bounds.width / 2) / zoom,
+                                 y: (canvas.worldOffset.y + canvas.bounds.height / 2) / zoom)
             #expect(abs(center.x - point.x) < 1)
             #expect(abs(center.y - point.y) < 1)
             #expect(canvas.zoomScale == zoom)
@@ -440,12 +440,15 @@ struct NotebookTests {
         }
         controls.addRectangle(color: .red, width: 6)
         canvas.delegate?.canvasViewDrawingDidChange?(canvas)
-        #expect(canvas.drawing.bounds.maxX < 0)
-        #expect(canvas.drawing.bounds.maxY < 0)
+        #expect(canvas.drawing.bounds.minX >= 0 && canvas.drawing.bounds.minY >= 0,
+                "PencilKit needs positive backing coordinates even when saved ink is negative")
+        #expect(canvas.contentOffset.x >= 0 && canvas.contentOffset.y >= 0)
+        #expect(canvas.worldDrawing.bounds.maxX < 0)
+        #expect(canvas.worldDrawing.bounds.maxY < 0)
         #expect(session.flush())
         let reopened = try repository.load(session.id)
         #expect(reopened.drawing.strokes.count == 1)
-        #expect(reopened.drawing.bounds == canvas.drawing.bounds)
+        #expect(reopened.drawing.bounds == canvas.worldDrawing.bounds)
         #expect(reopened.note.viewport.x < 0 && reopened.note.viewport.y < 0)
         let export = try #require(controls.pageImage())
         #expect(max(export.size.width, export.size.height) <= 4096)
@@ -474,7 +477,7 @@ struct NotebookTests {
             DispatchQueue.main.async { continuation.resume() }
         }
         #expect(restoredControls.viewport.value == reopened.note.viewport)
-        #expect(restoredControls.canvas?.drawing.bounds == reopened.drawing.bounds)
+        #expect(restoredControls.canvas?.worldDrawing.bounds == reopened.drawing.bounds)
     }
 
     @Test
@@ -593,6 +596,10 @@ struct NotebookTests {
             host.view.layoutIfNeeded()
             let canvas = try #require(controls.canvas)
             let clipboardVersion = UIPasteboard.general.changeCount
+            let originalCanvasInk = canvas.drawing.dataRepresentation()
+            #expect(canvas.worldDrawing.bounds == originalInk.bounds)
+            let source = CanvasSource.region(note: note, drawing: originalInk, bounds: originalInk.bounds)
+            #expect(controls.isCurrent(source), "Backing translation must preserve existing source fingerprints")
             controls.captureSelection(outline: [CGPoint(x: 60, y: 60), CGPoint(x: 260, y: 60), CGPoint(x: 60, y: 260)])
             let selected = try #require(controls.selection)
             #expect(selected.bounds == CGRect(x: 60, y: 60, width: 200, height: 200))
@@ -617,7 +624,7 @@ struct NotebookTests {
             // Outside the triangular lasso must be white, even though a photo fills its bounding box.
             let outside = (360 * cg.width + 360) * 4
             #expect(pixels[outside] > 240 && pixels[outside + 1] > 240 && pixels[outside + 2] > 240)
-            #expect(canvas.drawing.dataRepresentation() == originalInk.dataRepresentation())
+            #expect(canvas.drawing.dataRepresentation() == originalCanvasInk)
             #expect(UIPasteboard.general.changeCount == clipboardVersion)
             controls.captureSelection(outline: [CGPoint(x: 0, y: 0), CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])
             #expect(controls.selection == nil, "A drag or tap must not become a selected region")
@@ -628,7 +635,7 @@ struct NotebookTests {
             let background = controls.captureSelection(outline: selected.outline, publish: false)
             #expect(background != nil)
             #expect(controls.selection?.id == large.id, "Background capture must preserve the user’s lasso selection")
-            canvas.drawing = originalInk.transformed(using: CGAffineTransform(translationX: 300, y: 300))
+            canvas.worldDrawing = originalInk.transformed(using: CGAffineTransform(translationX: 300, y: 300))
             canvas.delegate?.canvasViewDrawingDidChange?(canvas)
             #expect(controls.selection == nil)
             #expect(controls.captureChangedRegion() != nil)

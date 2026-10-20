@@ -204,7 +204,7 @@ final class CanvasControls: ObservableObject {
                 NotebookTheme.paper.setFill()
                 output.fill(region)
                 canvas.paper.draw(canvas.paper.bounds)
-                canvas.drawing.image(from: region, scale: scale).draw(in: region)
+                canvas.worldDrawing.image(from: region, scale: scale).draw(in: region)
                 if !mask {
                     for block in canvas.paper.note.blocks ?? [] {
                         let text = "AI block\n" + block.body + "\n" + block.caveat
@@ -225,14 +225,14 @@ final class CanvasControls: ObservableObject {
         guard let png = image.pngData(), let contextPNG = contextImage.pngData() else { return nil }
         let captured = CanvasSelection(image: image, png: png, contextImage: contextImage, contextPNG: contextPNG,
                                     contextBounds: contextBounds, bounds: rect, outline: outline,
-                                    region: CanvasSource.region(note: canvas.paper.note, drawing: canvas.drawing, bounds: rect))
+                                    region: CanvasSource.region(note: canvas.paper.note, drawing: canvas.worldDrawing, bounds: rect))
         if publish { selection = captured }
         return captured
     }
 
     func resolveSource(_ region: NoteRegion) -> NoteRegion? {
         guard let canvas = canvas as? NotebookCanvasView else { return nil }
-        return CanvasSource.resolve(region, note: canvas.paper.note, drawing: canvas.drawing)
+        return CanvasSource.resolve(region, note: canvas.paper.note, drawing: canvas.worldDrawing)
     }
     func isCurrent(_ region: NoteRegion) -> Bool { resolveSource(region) != nil }
     func typedRegion() -> NoteRegion? {
@@ -283,7 +283,7 @@ final class CanvasControls: ObservableObject {
         guard let canvas = canvas as? NotebookCanvasView else { return }
         let animated = !UIAccessibility.isReduceMotionEnabled
         canvas.setZoomScale(canvas.fitZoomScale, animated: animated)
-        canvas.setContentOffset(.zero, animated: animated)
+        canvas.setWorldOffset(.zero, animated: animated)
     }
 
     func navigate(to point: CGPoint) {
@@ -291,13 +291,13 @@ final class CanvasControls: ObservableObject {
         let origin = CGPoint(x: point.x - canvas.bounds.width / canvas.zoomScale / 2,
                              y: point.y - canvas.bounds.height / canvas.zoomScale / 2)
         canvas.expand(toInclude: CGRect(origin: origin, size: canvas.visibleRect.size))
-        canvas.setContentOffset(CGPoint(x: origin.x * canvas.zoomScale, y: origin.y * canvas.zoomScale), animated: false)
+        canvas.setWorldOffset(CGPoint(x: origin.x * canvas.zoomScale, y: origin.y * canvas.zoomScale), animated: false)
     }
 
     func addRectangle(color: UIColor, width: CGFloat) {
         guard let canvas else { return }
-        let origin = CGPoint(x: (canvas.contentOffset.x + 80) / canvas.zoomScale,
-                             y: (canvas.contentOffset.y + 80) / canvas.zoomScale)
+        let origin = CGPoint(x: (canvas.worldOffset.x + 80) / canvas.zoomScale,
+                             y: (canvas.worldOffset.y + 80) / canvas.zoomScale)
         let points = [origin, CGPoint(x: origin.x + 180, y: origin.y),
                       CGPoint(x: origin.x + 180, y: origin.y + 110),
                       CGPoint(x: origin.x, y: origin.y + 110), origin]
@@ -305,14 +305,14 @@ final class CanvasControls: ObservableObject {
             PKStrokePoint(location: point, timeOffset: Double(index) * 0.1,
                           size: CGSize(width: width, height: width), opacity: 1, force: 1, azimuth: 0, altitude: .pi / 2)
         }, creationDate: Date())
-        replaceDrawing(PKDrawing(strokes: canvas.drawing.strokes + [PKStroke(ink: PKInk(.pen, color: color), path: path)]))
+        replaceDrawing(PKDrawing(strokes: canvas.worldDrawing.strokes + [PKStroke(ink: PKInk(.pen, color: color), path: path)]))
     }
 
     private func replaceDrawing(_ drawing: PKDrawing) {
         guard let canvas else { return }
-        let previous = canvas.drawing
+        let previous = canvas.worldDrawing
         canvas.undoManager?.registerUndo(withTarget: self) { $0.replaceDrawing(previous) }
-        canvas.drawing = drawing
+        canvas.worldDrawing = drawing
         refresh()
     }
 
@@ -331,7 +331,7 @@ final class CanvasControls: ObservableObject {
             context.cgContext.translateBy(x: -rect.minX, y: -rect.minY)
             PaperPattern.draw(canvas.paper.note.paper, in: context.cgContext, rect: rect, scale: scale)
             canvas.paper.draw(canvas.paper.bounds)
-            canvas.drawing.image(from: rect, scale: scale).draw(in: rect)
+            canvas.worldDrawing.image(from: rect, scale: scale).draw(in: rect)
             for block in canvas.paper.note.blocks ?? [] {
                 let bounds = block.bounds.cgRect
                 UIColor.white.setFill()
@@ -435,7 +435,42 @@ private final class PaperView: UIView {
     }
 }
 
+// PencilKit only accepts new strokes in positive content coordinates. Keep one stable
+// backing origin for the lifetime of the canvas so native lasso and undo share it.
+extension PKCanvasView {
+    var worldDrawing: PKDrawing {
+        get {
+            guard let canvas = self as? NotebookCanvasView else { return drawing }
+            return drawing.transformed(using: CGAffineTransform(translationX: -canvas.drawingOrigin.x,
+                                                                 y: -canvas.drawingOrigin.y))
+        }
+        set {
+            guard let canvas = self as? NotebookCanvasView else { drawing = newValue; return }
+            drawing = newValue.transformed(using: CGAffineTransform(translationX: canvas.drawingOrigin.x,
+                                                                    y: canvas.drawingOrigin.y))
+        }
+    }
+
+    var worldOffset: CGPoint {
+        get {
+            guard let canvas = self as? NotebookCanvasView else { return contentOffset }
+            return CGPoint(x: contentOffset.x - canvas.drawingOrigin.x * zoomScale,
+                           y: contentOffset.y - canvas.drawingOrigin.y * zoomScale)
+        }
+        set { setWorldOffset(newValue, animated: false) }
+    }
+
+    func setWorldOffset(_ point: CGPoint, animated: Bool) {
+        let origin = (self as? NotebookCanvasView)?.drawingOrigin ?? .zero
+        setContentOffset(CGPoint(x: max(0, point.x + origin.x * zoomScale),
+                                 y: max(0, point.y + origin.y * zoomScale)), animated: animated)
+    }
+}
+
 private final class NotebookCanvasView: PKCanvasView {
+    // ponytail: reserve 65,536 points left/up without rebasing native undo history.
+    // For larger negative extents, replace this with tiled canvas backing.
+    let drawingOrigin = CGPoint(x: 65_536, y: 65_536)
     let paper = PaperView(frame: CGRect(origin: .zero, size: NotebookPage.size))
     let pattern = PatternView()
     var readyForViewport = false
@@ -451,11 +486,11 @@ private final class NotebookCanvasView: PKCanvasView {
     private var previousFitZoom: CGFloat = 0
     var fitZoomScale: CGFloat { min(1, max(0.25, bounds.width / pageSize.width)) }
     var visibleRect: CGRect {
-        CGRect(x: contentOffset.x / zoomScale, y: contentOffset.y / zoomScale,
+        CGRect(x: worldOffset.x / zoomScale, y: worldOffset.y / zoomScale,
                width: bounds.width / zoomScale, height: bounds.height / zoomScale)
     }
     var occupiedRect: CGRect {
-        let content = CGRect(origin: .zero, size: pageSize).union(drawing.bounds.isNull ? .null : drawing.bounds.insetBy(dx: -32, dy: -32))
+        let content = CGRect(origin: .zero, size: pageSize).union(worldDrawing.bounds.isNull ? .null : worldDrawing.bounds.insetBy(dx: -32, dy: -32))
         return (paper.note.blocks ?? []).reduce(content) { $0.union($1.bounds.cgRect.insetBy(dx: -32, dy: -32)) }
     }
 
@@ -469,23 +504,26 @@ private final class NotebookCanvasView: PKCanvasView {
               rect.width.isFinite, rect.height.isFinite else { return }
         updatingExtent = true
         defer { updatingExtent = false }
-        // Grow scrollable margins in chunks; ink stays in its original coordinate space.
+        // Grow scrollable margins in chunks; the backing origin stays fixed.
         let padded = rect.insetBy(dx: -768, dy: -768)
         let extent = CGRect(x: floor(padded.minX / 1024) * 1024, y: floor(padded.minY / 1024) * 1024,
                             width: ceil(padded.maxX / 1024) * 1024 - floor(padded.minX / 1024) * 1024,
                             height: ceil(padded.maxY / 1024) * 1024 - floor(padded.minY / 1024) * 1024)
-        worldBounds = worldBounds.union(extent)
+        let expanded = worldBounds.union(extent)
+        let minX = max(-drawingOrigin.x, expanded.minX)
+        let minY = max(-drawingOrigin.y, expanded.minY)
+        worldBounds = CGRect(x: minX, y: minY, width: expanded.maxX - minX, height: expanded.maxY - minY)
         let offset = contentOffset
         // Insets allow navigation, but PencilKit also needs a drawable surface beyond the page.
         // Reserve it ahead of the viewport, and never resize while a tool is touching the canvas.
         if !isUsingTool {
-            let size = CGSize(width: max(pageSize.width, worldBounds.maxX) * zoomScale,
-                              height: max(pageSize.height, worldBounds.maxY) * zoomScale)
+            let size = CGSize(width: (drawingOrigin.x + max(pageSize.width, worldBounds.maxX)) * zoomScale,
+                              height: (drawingOrigin.y + max(pageSize.height, worldBounds.maxY)) * zoomScale)
             if contentSize != size { contentSize = size }
         }
-        let inset = UIEdgeInsets(top: -worldBounds.minY * zoomScale, left: -worldBounds.minX * zoomScale,
-                                 bottom: max(0, worldBounds.maxY * zoomScale - contentSize.height),
-                                 right: max(0, worldBounds.maxX * zoomScale - contentSize.width))
+        let inset = UIEdgeInsets(top: -(drawingOrigin.y + worldBounds.minY) * zoomScale,
+                                 left: -(drawingOrigin.x + worldBounds.minX) * zoomScale,
+                                 bottom: 0, right: 0)
         if contentInset != inset { contentInset = inset }
         if contentOffset != offset { contentOffset = offset }
     }
@@ -500,7 +538,7 @@ private final class NotebookCanvasView: PKCanvasView {
             if wasFit && fitChanged {
                 let center = CGPoint(x: visibleRect.midX, y: visibleRect.midY)
                 zoomScale = fitZoomScale
-                contentOffset = CGPoint(x: center.x * zoomScale - bounds.width / 2,
+                worldOffset = CGPoint(x: center.x * zoomScale - bounds.width / 2,
                                         y: center.y * zoomScale - bounds.height / 2)
             }
             alignPaper()
@@ -516,7 +554,7 @@ private final class NotebookCanvasView: PKCanvasView {
                              y: initialViewport.y.isFinite ? initialViewport.y : 0)
         expand(toInclude: occupiedRect.union(CGRect(x: offset.x / zoomScale, y: offset.y / zoomScale,
                                                    width: bounds.width / zoomScale, height: bounds.height / zoomScale)))
-        contentOffset = offset
+        worldOffset = offset
         readyForViewport = true
         alignPaper()
         viewportDidInitialize?()
@@ -526,8 +564,8 @@ private final class NotebookCanvasView: PKCanvasView {
         guard !updatingExtent else { return }
         if readyForViewport { expand(toInclude: visibleRect) }
         paper.transform = CGAffineTransform(scaleX: zoomScale, y: zoomScale)
-        paper.frame.origin = CGPoint(x: -contentOffset.x, y: -contentOffset.y)
-        pattern.viewport = PageViewport(zoom: zoomScale, x: contentOffset.x, y: contentOffset.y)
+        paper.frame.origin = CGPoint(x: -worldOffset.x, y: -worldOffset.y)
+        pattern.viewport = PageViewport(zoom: zoomScale, x: worldOffset.x, y: worldOffset.y)
     }
 }
 
@@ -585,7 +623,8 @@ private final class LassoRegionGesture: UIGestureRecognizer, UIGestureRecognizer
         guard let canvas = view as? NotebookCanvasView else { return .zero }
         // UIScrollView bounds already include the content offset.
         let point = touch.location(in: canvas)
-        return CGPoint(x: point.x / canvas.zoomScale, y: point.y / canvas.zoomScale)
+        return CGPoint(x: point.x / canvas.zoomScale - canvas.drawingOrigin.x,
+                       y: point.y / canvas.zoomScale - canvas.drawingOrigin.y)
     }
 }
 
@@ -625,7 +664,8 @@ struct InkCanvas: UIViewRepresentable {
         canvas.isOpaque = false
         canvas.backgroundColor = .clear
         canvas.pageSize = NotebookPage.size(for: session.note)
-        canvas.contentSize = canvas.pageSize
+        canvas.contentSize = CGSize(width: canvas.drawingOrigin.x + canvas.pageSize.width,
+                                    height: canvas.drawingOrigin.y + canvas.pageSize.height)
         canvas.paper.frame = CGRect(origin: .zero, size: canvas.pageSize)
         canvas.alwaysBounceVertical = true
         canvas.alwaysBounceHorizontal = true
@@ -633,7 +673,7 @@ struct InkCanvas: UIViewRepresentable {
         canvas.contentInsetAdjustmentBehavior = .never
         canvas.showsHorizontalScrollIndicator = false
         canvas.showsVerticalScrollIndicator = false
-        canvas.drawing = session.drawing
+        canvas.worldDrawing = session.drawing
         canvas.initialViewport = session.note.viewport
         canvas.paper.note = session.note
         canvas.pattern.style = session.note.paper
@@ -708,12 +748,12 @@ struct InkCanvas: UIViewRepresentable {
                 canvas.expand(toInclude: canvas.occupiedRect.union(canvas.visibleRect))
             }
             // Keep an emptied canvas ready for the next Pencil stroke, including after undo.
-            if canvasView.window != nil && canvasView.drawing.strokes.isEmpty {
+            if canvasView.window != nil && canvasView.worldDrawing.strokes.isEmpty {
                 canvasView.becomeFirstResponder()
             }
             controls.selection = nil
-            controls.recordChanges(from: session.drawing, to: canvasView.drawing)
-            session.setDrawing(canvasView.drawing)
+            controls.recordChanges(from: session.drawing, to: canvasView.worldDrawing)
+            session.setDrawing(canvasView.worldDrawing)
             scheduleOverview(canvasView)
             // Undo registration finishes after PencilKit's delegate callback.
             DispatchQueue.main.async { [weak controls] in controls?.refresh() }
@@ -732,7 +772,7 @@ struct InkCanvas: UIViewRepresentable {
             guard let canvas = scrollView as? NotebookCanvasView, canvas.readyForViewport, !canvas.updatingExtent else { return }
             // Keep lifecycle saves current even if the deferred overlay update has not run.
             session.setViewport(PageViewport(zoom: canvas.zoomScale,
-                                             x: canvas.contentOffset.x, y: canvas.contentOffset.y))
+                                             x: canvas.worldOffset.x, y: canvas.worldOffset.y))
             guard !viewportUpdatePending else { return }
             viewportUpdatePending = true
             // Coalesce scroll + zoom callbacks and read the latest position after layout.
@@ -741,7 +781,7 @@ struct InkCanvas: UIViewRepresentable {
                 self.viewportUpdatePending = false
                 guard let canvas else { return }
                 let viewport = PageViewport(zoom: canvas.zoomScale,
-                                            x: canvas.contentOffset.x, y: canvas.contentOffset.y)
+                                            x: canvas.worldOffset.x, y: canvas.worldOffset.y)
                 if self.controls.viewport.value != viewport { self.controls.viewport.value = viewport }
                 if self.controls.viewport.size != canvas.bounds.size { self.controls.viewport.size = canvas.bounds.size }
                 if self.controls.overview.snapshot.bounds != canvas.worldBounds {
@@ -764,7 +804,7 @@ struct InkCanvas: UIViewRepresentable {
                     output.cgContext.scaleBy(x: scale, y: scale)
                     output.cgContext.translateBy(x: -rect.minX, y: -rect.minY)
                     canvas.paper.draw(canvas.paper.bounds)
-                    canvas.drawing.image(from: rect, scale: scale).draw(in: rect)
+                    canvas.worldDrawing.image(from: rect, scale: scale).draw(in: rect)
                 }
                 self.controls.overview.snapshot = CanvasOverview.Snapshot(bounds: rect, imageBounds: rect, image: image)
             }
