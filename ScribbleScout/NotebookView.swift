@@ -115,6 +115,7 @@ private struct SharedPage: Identifiable {
 private struct NoteEditor: View {
     @ObservedObject var session: NoteSession
     var openNotebook: () -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @StateObject private var controls = CanvasControls()
     @State private var selectedTool: DrawingTool = .pen
     @State private var inkColor = NotebookTheme.ink
@@ -136,10 +137,9 @@ private struct NoteEditor: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let scale = geometry.size.width / 1448
-            let compact = geometry.size.width < 700
+            let compact = geometry.size.width < 850 || dynamicTypeSize.isAccessibilitySize
             VStack(spacing: 0) {
-                header(compact: compact, scale: compact ? 0.9 : scale)
+                header(compact: compact)
                 if let error = session.saveError {
                     HStack {
                         Text(error).font(.callout)
@@ -155,20 +155,16 @@ private struct NoteEditor: View {
                     }
                 }
                 .clipped()
-                .overlay(alignment: .bottom) {
-                    if compact {
-                        ScrollView(.horizontal, showsIndicators: false) { drawingBar.padding(.horizontal, 16) }
-                            .frame(height: 78).padding(.bottom, 20)
-                    } else {
-                        drawingBar
-                            .scaleEffect(min(1, scale), anchor: .bottom)
-                            .padding(.bottom, 27 * scale)
-                    }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    drawingBar
+                        .frame(maxWidth: 726)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 4)
+                        .padding(.bottom, 8)
                 }
             }
             .background(Color(uiColor: NotebookTheme.paper))
         }
-        .ignoresSafeArea()
         .sheet(isPresented: $editingText) { textSheet }
         .sheet(item: $contextAction) { action in contextSheet(action) }
         .sheet(item: $sharedPage) { page in ShareSheet(items: [page.image]) }
@@ -189,51 +185,53 @@ private struct NoteEditor: View {
         .onDisappear { session.flush() }
     }
 
-    private func header(compact: Bool, scale: CGFloat) -> some View {
-        HStack(spacing: 0) {
-            Button(action: openNotebook) { Image(systemName: "line.3.horizontal").font(.system(size: 22 * scale)).frame(width: 60 * scale, height: 56 * scale) }
+    private func header(compact: Bool) -> some View {
+        HStack(spacing: 8) {
+            Button(action: openNotebook) { dockIcon("line.3.horizontal") }
                 .accessibilityLabel("Open notebook")
-            headerDivider(scale)
             TextField("Note title", text: Binding(get: { session.note.title }, set: { value in session.edit { $0.title = value } }))
-                .font(.system(size: 19 * scale, weight: .semibold))
-                .frame(maxWidth: compact ? .infinity : 205 * scale)
-                .padding(.horizontal, 22 * scale)
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: compact ? .infinity : 280, minHeight: 44)
                 .accessibilityLabel("Note title").accessibilityIdentifier("noteTitle").submitLabel(.done)
             if !compact {
-                headerDivider(scale)
-                Text(session.note.createdAt.formatted(.dateTime.day().month(.abbreviated).year().locale(Locale(identifier: "en_AU"))))
-                    .font(.system(size: 17 * scale)).padding(.horizontal, 22 * scale)
+                Divider().frame(height: 24)
+                Text(session.note.createdAt, format: .dateTime.day().month(.abbreviated).year())
+                    .font(.subheadline).foregroundStyle(NotebookTheme.muted)
+                    .padding(.horizontal, 12)
                 Spacer(minLength: 0)
             }
-            Button(action: controls.undo) { Image(systemName: "arrow.uturn.backward").frame(width: 50 * scale, height: 44) }
+            Button(action: controls.undo) { dockIcon("arrow.uturn.backward") }
                 .disabled(!controls.canUndo).accessibilityLabel("Undo ink").keyboardShortcut("z", modifiers: .command)
             if !compact {
-                Button(action: controls.redo) { Image(systemName: "arrow.uturn.forward").frame(width: 50 * scale, height: 44) }
+                Button(action: controls.redo) { dockIcon("arrow.uturn.forward") }
                     .disabled(!controls.canRedo).accessibilityLabel("Redo ink").keyboardShortcut("z", modifiers: [.command, .shift])
-                optionsMenu.frame(width: 54 * scale)
             }
+            optionsMenu
             Button(action: share) {
-                HStack(spacing: 10) {
-                    Image(systemName: "person").font(.system(size: 18 * scale))
-                    if !compact { Text("Share").font(.system(size: 16 * scale, weight: .medium)) }
+                HStack(spacing: 8) {
+                    Image(systemName: "square.and.arrow.up").font(.system(size: 20))
+                    if !compact { Text("Share") }
                 }
-                .foregroundStyle(.white).padding(.horizontal, 14 * scale).frame(height: max(38, 39 * scale))
-                .background(NotebookTheme.burgundy.gradient, in: RoundedRectangle(cornerRadius: 8))
+                    .font(.subheadline.weight(.semibold))
+                    .frame(minWidth: 44, minHeight: 44)
+                    .padding(.horizontal, compact ? 0 : 10)
+                    .foregroundStyle(.white)
+                    .background(NotebookTheme.burgundy, in: RoundedRectangle(cornerRadius: 12))
             }
-            .accessibilityLabel("Share note").padding(.leading, 12 * scale).padding(.trailing, 19 * scale)
+            .accessibilityLabel("Share note")
         }
+        .buttonStyle(.borderless)
         .foregroundStyle(NotebookTheme.ink)
-        .frame(height: max(48, 60 * scale))
-        .background(Color(red: 0.986, green: 0.980, blue: 0.974))
-        .overlay(alignment: .bottom) { Rectangle().fill(.black.opacity(0.055)).frame(height: 1) }
-    }
-
-    private func headerDivider(_ scale: CGFloat) -> some View {
-        Rectangle().fill(.black.opacity(0.14)).frame(width: 1, height: 22 * scale)
+        .padding(.horizontal, 12).padding(.vertical, 4)
+        .background(Color(uiColor: .systemBackground))
+        .overlay(alignment: .bottom) { Divider() }
     }
 
     private var optionsMenu: some View {
         Menu {
+            Button("Undo ink", systemImage: "arrow.uturn.backward", action: controls.undo).disabled(!controls.canUndo)
+            Button("Redo ink", systemImage: "arrow.uturn.forward", action: controls.redo).disabled(!controls.canRedo)
+            Divider()
             Picker("Paper", selection: Binding(get: { session.note.paper }, set: { value in session.edit { $0.paper = value } })) {
                 ForEach(PaperStyle.allCases) { Text($0.title).tag($0) }
             }
@@ -249,64 +247,132 @@ private struct NoteEditor: View {
                 Button("Remove photo", systemImage: "photo.badge.minus") { session.edit { $0.attachment = nil } }
             }
             Text(session.saveMessage)
-        } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
+        } label: { Image(systemName: "ellipsis").font(.system(size: 20)).frame(width: 44, height: 44) }
         .accessibilityLabel("Page options")
     }
 
+    private var inkChoices: [(name: String, color: Color)] {
+        [("Black", NotebookTheme.ink), ("Burgundy", NotebookTheme.burgundy),
+         ("Sage", NotebookTheme.sage), ("Gray", Color(red: 0.82, green: 0.82, blue: 0.82))]
+    }
+
+    private var inkName: String {
+        inkChoices.first { $0.color == inkColor }?.name ?? "Custom color"
+    }
+
+    private var widthName: String {
+        width == 1.5 ? "Fine" : width == 6 ? "Bold" : "Medium"
+    }
+
     private var drawingBar: some View {
+        ViewThatFits(in: .horizontal) {
+            drawingControls
+            ScrollView(.horizontal, showsIndicators: false) {
+                drawingControls
+            }
+            .frame(height: 44)
+            .accessibilityHint("Swipe horizontally for more drawing controls")
+        }
+        .buttonStyle(.borderless).tint(NotebookTheme.ink)
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(Color(uiColor: .systemBackground), in: Capsule())
+        .overlay(Capsule().stroke(NotebookTheme.ink.opacity(0.18), lineWidth: 1))
+        .shadow(color: .black.opacity(0.08), radius: 6, y: 4)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var drawingControls: some View {
         HStack(spacing: 8) {
-            ForEach([DrawingTool.pen, .marker, .eraser], id: \.self) { item in toolButton(item) }
+            toolChoices
             dockDivider
-            toolButton(.lasso)
+            insertActions
+            dockDivider
+            colorChoices
+            strokeWidthMenu
+        }
+    }
+
+    private var toolChoices: some View {
+        HStack(spacing: 8) {
+            ForEach(DrawingTool.allCases, id: \.self) { item in toolButton(item) }
+        }
+    }
+
+    private var insertActions: some View {
+        HStack(spacing: 8) {
             Button { editingText = true } label: { dockIcon("textformat") }.accessibilityLabel("Typed notes")
             Button { controls.addRectangle(color: UIColor(inkColor), width: width) } label: { dockIcon("square") }
                 .accessibilityLabel("Insert rectangle")
             PhotosPicker(selection: $selectedPhoto, matching: .images) { dockIcon("photo") }.accessibilityLabel("Insert photo")
-            optionsMenu
-            dockDivider
-            ForEach(Array([NotebookTheme.ink, .init(red: 0.51, green: 0.12, blue: 0.24), NotebookTheme.sage,
-                           Color(red: 0.82, green: 0.82, blue: 0.82)].enumerated()), id: \.offset) { index, color in
-                Button { inkColor = color } label: {
-                    Circle().fill(color.gradient).frame(width: 25, height: 25)
-                        .overlay(Circle().strokeBorder(.black.opacity(0.08), lineWidth: 1))
-                        .frame(width: 36, height: 44).contentShape(Rectangle())
-                }
-                .accessibilityLabel(["Black ink", "Burgundy ink", "Sage ink", "Gray ink"][index])
-                .accessibilityAddTraits(inkColor == color ? .isSelected : [])
-            }
-            ColorPicker("Custom ink color", selection: $inkColor, supportsOpacity: false)
-                .labelsHidden().frame(width: 35, height: 44)
-                .opacity(0.02)
-                .overlay { Image(systemName: "plus.circle").font(.system(size: 30, weight: .ultraLight)).foregroundStyle(.gray).allowsHitTesting(false) }
-                .accessibilityLabel("Custom ink color")
         }
-        .buttonStyle(.plain).foregroundStyle(NotebookTheme.ink)
-        .padding(.horizontal, 14).frame(width: 726, height: 68)
-        .background(.white.opacity(0.97), in: Capsule())
-        .overlay(Capsule().stroke(.black.opacity(0.08), lineWidth: 1))
-        .shadow(color: .black.opacity(0.10), radius: 10, y: 4)
     }
 
-    private var dockDivider: some View { Rectangle().fill(.black.opacity(0.09)).frame(width: 1, height: 30).padding(.horizontal, 7) }
+    private var colorChoices: some View {
+        HStack(spacing: 8) {
+            ForEach(inkChoices, id: \.name) { choice in
+                let selected = inkColor == choice.color
+                Button { inkColor = choice.color } label: {
+                    Circle().fill(choice.color)
+                        .frame(width: 28, height: 28)
+                        .overlay(Circle().strokeBorder(NotebookTheme.ink.opacity(0.2), lineWidth: 1))
+                        .overlay {
+                            if selected {
+                                Image(systemName: "checkmark").font(.system(size: 16, weight: .bold))
+                                    .foregroundStyle(choice.name == "Gray" ? NotebookTheme.ink : .white)
+                            }
+                        }
+                        .frame(width: 44, height: 44)
+                        .overlay(Circle().strokeBorder(selected ? NotebookTheme.ink : .clear, lineWidth: 1.5))
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("\(choice.name) ink")
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+            ColorPicker("Custom ink color", selection: $inkColor, supportsOpacity: false)
+                .labelsHidden().frame(width: 44, height: 44)
+                .overlay(Circle().strokeBorder(inkName == "Custom color" ? NotebookTheme.ink : .clear, lineWidth: 2).allowsHitTesting(false))
+                .accessibilityLabel("Custom ink color")
+                .accessibilityAddTraits(inkName == "Custom color" ? .isSelected : [])
+        }
+    }
+
+    private var strokeWidthMenu: some View {
+        Menu {
+            Picker("Stroke width", selection: $width) {
+                Text("Fine").tag(1.5)
+                Text("Medium").tag(3.0)
+                Text("Bold").tag(6.0)
+            }
+        } label: {
+            VStack(spacing: 4) {
+                Capsule().frame(width: 20, height: width + 1)
+                Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+            }.frame(width: 44, height: 44).contentShape(Rectangle())
+        }
+        .accessibilityLabel("Stroke width").accessibilityValue(widthName)
+    }
+
+    private var dockDivider: some View { Divider().frame(height: 28) }
     private func dockIcon(_ symbol: String) -> some View {
-        Image(systemName: symbol).font(.system(size: 23, weight: .regular)).frame(width: 44, height: 44).contentShape(Rectangle())
+        Image(systemName: symbol).font(.system(size: 20)).frame(width: 44, height: 44).contentShape(Rectangle())
     }
     private func toolButton(_ item: DrawingTool) -> some View {
-        Button { selectedTool = item } label: {
-            dockIcon(item.symbol)
-                .foregroundStyle(item == .marker ? Color(red: 0.55, green: 0.47, blue: 0.26) : NotebookTheme.ink)
-                .background(selectedTool == item ? Color(red: 0.965, green: 0.949, blue: 0.950) : .clear, in: RoundedRectangle(cornerRadius: 9))
-                .overlay(alignment: .bottom) {
-                    if selectedTool == item { Capsule().fill(NotebookTheme.burgundy).frame(width: 39, height: 3).offset(y: 2) }
-                }
+        let selected = selectedTool == item
+        return Button { selectedTool = item } label: {
+            Image(systemName: item.symbol).font(.system(size: 20))
+            .frame(width: 44, height: 44)
+            .foregroundStyle(selected ? NotebookTheme.burgundy : NotebookTheme.ink)
+            .background(selected ? NotebookTheme.burgundy.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(selected ? NotebookTheme.burgundy : .clear, lineWidth: 1.5))
+            .contentShape(Rectangle())
         }
-        .accessibilityLabel(item.rawValue).accessibilityAddTraits(selectedTool == item ? .isSelected : [])
+        .accessibilityLabel(item.rawValue).accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private var textSheet: some View {
         NavigationStack {
             TextEditor(text: Binding(get: { session.note.text }, set: { value in session.edit { $0.text = value } }))
-                .font(.system(size: 22)).padding(20).scrollContentBackground(.hidden)
+                .font(.body).padding(20).scrollContentBackground(.hidden)
                 .background(Color(uiColor: NotebookTheme.paper))
                 .accessibilityLabel("Typed notes").accessibilityIdentifier("typedNotes")
                 .navigationTitle("Typed notes").navigationBarTitleDisplayMode(.inline)
