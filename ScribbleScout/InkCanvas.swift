@@ -13,8 +13,14 @@ final class CanvasControls: ObservableObject {
         canRedo = canvas?.undoManager?.canRedo ?? false
         zoom = Double(canvas?.zoomScale ?? 1)
     }
-    func undo() { canvas?.undoManager?.undo(); refresh() }
-    func redo() { canvas?.undoManager?.redo(); refresh() }
+    func undo() {
+        canvas?.undoManager?.undo()
+        DispatchQueue.main.async { [weak self] in self?.refresh() }
+    }
+    func redo() {
+        canvas?.undoManager?.redo()
+        DispatchQueue.main.async { [weak self] in self?.refresh() }
+    }
     func resetZoom() {
         guard let canvas else { return }
         canvas.setZoomScale(canvas.minimumZoomScale, animated: true)
@@ -22,7 +28,7 @@ final class CanvasControls: ObservableObject {
     }
 }
 
-/// Paper is an ordinary scroll-content subview with the same page-to-view scale as ink.
+/// A sibling paper layer uses the public scroll offset and zoom scale, without inspecting PencilKit's view hierarchy.
 private final class PaperView: UIView {
     var style: PaperStyle = .dotted { didSet { setNeedsDisplay() } }
 
@@ -57,11 +63,11 @@ private final class NotebookCanvasView: PKCanvasView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        guard bounds.width > 0, !readyForViewport else { return }
+        guard bounds.width > 0 else { return }
+        minimumZoomScale = min(1, max(0.25, bounds.width / NotebookPage.size.width))
+        guard !readyForViewport else { alignPaper(); return }
         paper.isUserInteractionEnabled = false
         paper.backgroundColor = .systemBackground
-        insertSubview(paper, at: 0)
-        minimumZoomScale = min(1, max(0.25, bounds.width / NotebookPage.size.width))
         maximumZoomScale = 3
         zoomScale = max(minimumZoomScale, min(maximumZoomScale, initialViewport.zoom))
         let maxX = max(0, contentSize.width - bounds.width)
@@ -74,7 +80,24 @@ private final class NotebookCanvasView: PKCanvasView {
 
     func alignPaper() {
         paper.transform = CGAffineTransform(scaleX: zoomScale, y: zoomScale)
-        paper.frame.origin = .zero
+        paper.frame.origin = CGPoint(x: -contentOffset.x, y: -contentOffset.y)
+    }
+}
+
+private final class CanvasContainer: UIView {
+    let canvas = NotebookCanvasView()
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        clipsToBounds = true
+        backgroundColor = .systemBackground
+        addSubview(canvas.paper)
+        addSubview(canvas)
+    }
+    required init?(coder: NSCoder) { fatalError("Use init(frame:)") }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        canvas.frame = bounds
+        canvas.alignPaper()
     }
 }
 
@@ -84,10 +107,11 @@ struct InkCanvas: UIViewRepresentable {
     var tool: PKTool
     var fingerDrawing: Bool
 
-    func makeUIView(context: Context) -> PKCanvasView {
-        let canvas = NotebookCanvasView()
+    func makeUIView(context: Context) -> UIView {
+        let container = CanvasContainer()
+        let canvas = container.canvas
         canvas.isOpaque = false
-        canvas.backgroundColor = .systemBackground
+        canvas.backgroundColor = .clear
         canvas.contentSize = NotebookPage.size
         canvas.alwaysBounceVertical = true
         canvas.drawing = session.drawing
@@ -102,13 +126,18 @@ struct InkCanvas: UIViewRepresentable {
         canvas.viewportDidInitialize = { [weak controls] in
             DispatchQueue.main.async { controls?.refresh() }
         }
-        return canvas
+        return container
     }
 
-    func updateUIView(_ uiView: PKCanvasView, context: Context) {
-        uiView.tool = tool
-        uiView.drawingPolicy = fingerDrawing ? .anyInput : .pencilOnly
-        (uiView as? NotebookCanvasView)?.paper.style = session.note.paper
+    func updateUIView(_ uiView: UIView, context: Context) {
+        guard let canvas = (uiView as? CanvasContainer)?.canvas else { return }
+        // Keep the active tool stable while PencilKit completes drawing and undo operations.
+        if let ink = tool as? PKInkingTool, (canvas.tool as? PKInkingTool) != ink { canvas.tool = ink }
+        if let eraser = tool as? PKEraserTool, (canvas.tool as? PKEraserTool) != eraser { canvas.tool = eraser }
+        if tool is PKLassoTool, !(canvas.tool is PKLassoTool) { canvas.tool = tool }
+        let policy: PKCanvasViewDrawingPolicy = fingerDrawing ? .anyInput : .pencilOnly
+        if canvas.drawingPolicy != policy { canvas.drawingPolicy = policy }
+        if canvas.paper.style != session.note.paper { canvas.paper.style = session.note.paper }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(session: session, controls: controls) }
@@ -128,7 +157,10 @@ struct InkCanvas: UIViewRepresentable {
             (scrollView as? NotebookCanvasView)?.alignPaper()
             saveViewport(scrollView)
         }
-        func scrollViewDidScroll(_ scrollView: UIScrollView) { saveViewport(scrollView) }
+        func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            (scrollView as? NotebookCanvasView)?.alignPaper()
+            saveViewport(scrollView)
+        }
 
         private func saveViewport(_ scrollView: UIScrollView) {
             guard (scrollView as? NotebookCanvasView)?.readyForViewport == true else { return }

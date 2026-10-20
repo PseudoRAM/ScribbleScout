@@ -1,18 +1,117 @@
-# Scribble Scout
+# Scribble Scout: AI Note Taking
 
-An iPad notebook built with SwiftUI and PencilKit, with handwriting, typed notes, and local storage.
+A native, pen-first notebook for iPad, built with SwiftUI and PencilKit. Capture handwriting, sketches, and typed notes in a small local library.
 
-## Features
+**Current milestone: the local notebook foundation.** AI recognition and research are planned; they are not implemented yet. The app works offline and makes no network requests.
 
-- Apple Pencil and optional finger drawing, with pen, highlighter, eraser, and lasso tools.
-- Typed notes, title and text search, and dotted, ruled, or blank paper.
-- Undo and redo for ink, page zoom, and a saved viewport for each note.
-- Automatic local saving with a previous snapshot for recovery.
+## What works today
 
-## Running the app
+- Create, rename, search, select, and reopen notes with titles and dates.
+- Write with Apple Pencil, or enable finger drawing for the simulator and touch input.
+- Use a pen, highlighter, stroke eraser, or lasso, with ink color and width controls.
+- Undo and redo ink edits; pinch to zoom and return to fit width.
+- Choose dotted, ruled, or blank paper and keep typed notes alongside each canvas.
+- Save automatically, restore the last open note, and retain each note's zoom and scroll position.
+- Recover the previous complete snapshot if the latest metadata or ink is unreadable. A failed save keeps the edited note open and offers Retry.
 
-Open `ScribbleScout.xcodeproj` in Xcode, select the `ScribbleScout` scheme, and run on an iPad simulator or device with iOS 18 or later. For a physical device, select your development team in Signing & Capabilities.
+## Requirements
 
-The `ScribbleScoutTests` target covers local note persistence and recovery. Run it with Product > Test in Xcode.
+| Requirement | Supported / verified |
+| --- | --- |
+| Development tools | Xcode 26.2; no third-party packages |
+| Minimum deployment target | iOS / iPadOS 18.0 |
+| Primary platform | iPad; iPhone layouts are also enabled |
+| Simulator verified | iPad Pro 13-inch (M5), iPadOS 26.2 |
+| Physical device verified | iPad mini (6th generation), iPadOS 26.5: signed build, installation, launch, and running-process check |
 
-AI features are not yet implemented.
+Apple Pencil feel, palm rejection, and the full handwriting workflow on the physical iPad still need a hands-on check. Simulator checks cover creating and switching notes, typed text, search, paper rendering, ink undo/redo, and reopening saved content after relaunch.
+
+## Get started
+
+```sh
+git clone https://github.com/PseudoRAM/ScribbleScout.git
+cd ScribbleScout
+open ScribbleScout.xcodeproj
+```
+
+In Xcode, choose the **ScribbleScout** scheme and an installed iPad simulator, then Run (⌘R). There are no app accounts, API keys, environment files, or backend services to configure.
+
+### Run on an iPad
+
+1. Connect and unlock the iPad. Complete pairing and approve Trust if prompted.
+2. Enable Developer Mode on the iPad if Xcode requests it.
+3. Sign in to your Apple Account in **Xcode → Settings → Accounts**.
+4. Under **ScribbleScout → Signing & Capabilities**, select your development team. The repository currently uses the BILLABYTE team; other developers should choose their own team and a bundle identifier they can sign.
+5. Select the connected iPad as the run destination and Run (⌘R).
+
+If signing fails with a rejected account login, sign in again in Xcode before retrying. Signing certificates and provisioning profiles are kept outside this repository.
+
+## Using the notebook
+
+Create a note with **New note** and edit its title at the top. Switch between **Handwriting** and **Text** to add ink or typed notes to the same record. Search matches note titles and typed text; it does not recognise handwriting yet.
+
+In Handwriting mode, the toolbar provides the drawing tools, color, and width. **Page options** (the ellipsis button) changes paper and toggles finger drawing.
+
+| Input mode | Write | Scroll / zoom |
+| --- | --- | --- |
+| Default | Apple Pencil | One finger to scroll; pinch to zoom |
+| Draw with finger | Finger or Apple Pencil | Two fingers to scroll; pinch to zoom |
+
+Keyboard shortcuts: **⌘N** creates a note, **⌘Z** undoes ink, and **⇧⌘Z** redoes ink. Ink undo history belongs to the open canvas and is not saved across app launches.
+
+## Local storage and recovery
+
+Notes live in the app's `Application Support/ScribbleScout` directory, with one UUID folder per note:
+
+```text
+<note-id>/
+  note.json         # Current metadata, typed text, viewport, and ink filename
+  previous.json     # Previous complete metadata snapshot
+  <uuid>.drawing    # Original PencilKit ink, stored separately
+```
+
+Ink changes write an immutable drawing file first. The app then atomically commits metadata pointing to that file, retaining the previous complete snapshot. Obsolete ink is removed only after the commit, keeping files referenced by either snapshot. Autosave runs after a 350 ms pause; switching notes and backgrounding flush pending edits immediately.
+
+There is no cloud sync, analytics, AI processing, or note transmission. Storage recovery protects against an interrupted save; it is not an external backup. Uninstalling the app removes its local notes. Export, deletion, and multi-page notebooks are not part of this first version.
+
+## Tests
+
+Run **Product → Test** (⌘U) in Xcode, or use an installed simulator:
+
+```sh
+xcodebuild -project ScribbleScout.xcodeproj -scheme ScribbleScout \
+  -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5)' \
+  -derivedDataPath build CODE_SIGNING_ALLOWED=NO test
+```
+
+Choose a simulator available on your Mac if that model is not installed. **Five tests pass**, using real PencilKit strokes to verify:
+
+- Ink, text, paper, and viewport round trips, with separate notes kept isolated.
+- Recovery from damaged metadata and an interrupted ink write.
+- Recovery from a corrupt latest drawing.
+- Retention of only the current and previous drawing snapshots.
+- Preservation of in-memory edits when saving fails.
+
+For a hands-on device check: create two notes, write and erase ink, undo/redo, zoom and scroll, switch notes, then background and relaunch. Confirm that the ink, typed text, and viewport survive.
+
+## Code layout
+
+| File | Responsibility |
+| --- | --- |
+| `ScribbleScout/ScribbleScoutApp.swift` | App entry point and lifecycle save |
+| `ScribbleScout/Notebook.swift` | Note records, local snapshots, autosave sessions, and library state |
+| `ScribbleScout/InkCanvas.swift` | PencilKit bridge, paper rendering, viewport, and ink controls |
+| `ScribbleScout/NotebookView.swift` | Library, search, note editor, and drawing toolbar |
+| `ScribbleScoutTests/NotebookTests.swift` | Persistence and recovery tests |
+
+Canvas coordinates use a fixed **1,000 × 1,400 point** page, exposed by `NotebookPage.size` for future annotations. The implementation uses Apple's frameworks directly; no OwlLuna or other upstream application code was copied. Snapshot writes currently run synchronously and suit a small notebook; larger libraries may need background I/O.
+
+## Next milestones
+
+The roadmap is tracked in [AI Notebook: Pen to Evidence](https://linear.app/billabyteau/project/ai-notebook-pen-to-evidence-b701e6ca633c):
+
+- [BIL-8: Local notebook foundation](https://linear.app/billabyteau/issue/BIL-8/build-the-swiftuipencilkit-workspace-with-durable-local-notes) — implemented and tested.
+- [BIL-5: Device and recognition feasibility](https://linear.app/billabyteau/issue/BIL-5/verify-the-real-ipad-sdk-and-handwriting-recognition-path) — device deployment verified; recognition evaluation remains.
+- [BIL-7: Shared assistance records and fixtures](https://linear.app/billabyteau/issue/BIL-7/define-shared-notebook-records-and-deterministic-provider-fixtures), followed by selected-handwriting recognition, cited research, and anchored evidence.
+
+Audio, calendar integration, local recall, sync, and hosted services are outside this initial milestone. A project licence has not been selected yet; that decision and the full open-source release checklist remain in [BIL-24](https://linear.app/billabyteau/issue/BIL-24/prepare-a-reproducible-credential-free-open-source-release).

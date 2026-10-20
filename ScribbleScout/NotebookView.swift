@@ -5,13 +5,14 @@ struct NotebookView: View {
     @ObservedObject var store: NotebookStore
     @State private var search = ""
     @State private var visibility: NavigationSplitViewVisibility = .all
+    @State private var compactColumn: NavigationSplitViewColumn = .sidebar
 
     private var filteredNotes: [NoteRecord] {
         store.notes.filter { search.isEmpty || $0.title.localizedCaseInsensitiveContains(search) || $0.text.localizedCaseInsensitiveContains(search) }
     }
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $visibility) {
+        NavigationSplitView(columnVisibility: $visibility, preferredCompactColumn: $compactColumn) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 12) {
                     Image(systemName: "pencil.tip.crop.circle")
@@ -24,7 +25,7 @@ struct NotebookView: View {
                 }
                 .padding(.horizontal, 22).padding(.vertical, 24)
 
-                Button(action: store.create) {
+                Button(action: createNote) {
                     Label("New note", systemImage: "square.and.pencil")
                         .font(.headline).frame(maxWidth: .infinity, minHeight: 44)
                 }
@@ -32,6 +33,16 @@ struct NotebookView: View {
                 .padding(.horizontal, 20).padding(.bottom, 20)
                 .keyboardShortcut("n", modifiers: .command)
                 .accessibilityIdentifier("newNote")
+
+                HStack {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Find a note", text: $search)
+                        .accessibilityLabel("Find a note")
+                        .autocorrectionDisabled()
+                }
+                .padding(12)
+                .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal, 20).padding(.bottom, 20)
 
                 HStack {
                     Text("YOUR NOTEBOOK").font(.caption.weight(.semibold)).tracking(1.4)
@@ -73,7 +84,6 @@ struct NotebookView: View {
             .background(Color(uiColor: .secondarySystemGroupedBackground))
             .navigationTitle("Notebook")
             .toolbar(.hidden, for: .navigationBar)
-            .searchable(text: $search, prompt: "Find a note")
             .navigationSplitViewColumnWidth(min: 270, ideal: 310, max: 380)
         } detail: {
             if let session = store.current {
@@ -84,14 +94,21 @@ struct NotebookView: View {
                 } description: {
                     Text("Capture an idea, sketch a plan, or start a fresh page.\nYour notebook is saved locally, ready whenever you are.")
                 } actions: {
-                    Button("Create your first note", action: store.create).buttonStyle(.borderedProminent)
+                    Button("Create your first note", action: createNote).buttonStyle(.borderedProminent)
                 }
                 .navigationTitle("Scribble Scout")
             }
         }
+        .onAppear { if store.current != nil { compactColumn = .detail } }
+        .onChange(of: store.current?.id) { _, id in if id != nil { compactColumn = .detail } }
         .alert("Notebook notice", isPresented: Binding(get: { store.issue != nil }, set: { if !$0 { store.issue = nil } })) {
             Button("OK") { store.issue = nil }
         } message: { Text(store.issue ?? "") }
+    }
+
+    private func createNote() {
+        store.create()
+        if store.current != nil { compactColumn = .detail }
     }
 }
 
@@ -204,7 +221,7 @@ private struct NoteEditor: View {
                 Text(mode == .ink ? (fingerDrawing ? "Finger or Pencil to write · two fingers to scroll" : "Apple Pencil to write · finger to scroll") : "A space for the words behind your sketches")
                 Spacer()
                 if mode == .ink {
-                    Button("\(Int(controls.zoom * 100))% · Fit page", action: controls.resetZoom)
+                    Button("\(Int(controls.zoom * 100))% · Fit width", action: controls.resetZoom)
                         .accessibilityLabel("Fit page width")
                 }
             }
