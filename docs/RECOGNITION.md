@@ -20,6 +20,8 @@ Synthetic printed text, deterministic fixtures, simulated strokes and mocked HTT
 
 Use the physical-device checklist in [DEMO.md](DEMO.md) for handwriting, acronyms, negation, erasure and diagrams. Keep recognition errors and stage timings with the tested app/model versions. No ≥80% usefulness or <10-second result is claimed without those measurements.
 
+The [20 October physical-device report](device-reports/2026-10-20-real-handwriting.md) records the installed merged-main build and the pending/observed human sample outcomes for BIL-5 and BIL-9. Setup success alone does not satisfy their remaining criteria.
+
 ## Official API contracts checked
 
 - [Image inputs](https://developers.openai.com/api/docs/guides/images-vision): Responses accepts image inputs; visual interpretation can fail, particularly on small or ambiguous text.
