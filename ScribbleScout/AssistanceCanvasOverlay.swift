@@ -71,10 +71,8 @@ struct AssistanceCanvasOverlay: View {
                 }
             }
         }
-        .popover(isPresented: $showingStatus) {
+        .sheet(isPresented: $showingStatus) {
             ScoutSettingsSheet(credentials: credentials, coordinator: coordinator)
-                .frame(idealWidth: 380, idealHeight: 520)
-                .presentationCompactAdaptation(.sheet)
         }
         .sheet(item: $editing) { block in
             AIBlockEditor(block: block, session: session, controls: controls)

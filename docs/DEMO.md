@@ -55,7 +55,7 @@ Record organiser slot/submission requirements separately. Neither a simulator vi
 
 BIL-5–17 cover the essential demo, with BIL-18 providing the bounded pause enhancement and BIL-19 selected explanations/follow-ups. BIL-20–22 dated local Recall is implemented as optional demo scope. Hosted services, accounts, study telemetry, sync and request-circle gestures are not needed for this demonstration.
 
-## Verification · 20 October 2026
+## Earlier implementation verification · 20 October 2026
 
 - 26 Foundation-only tests pass in Debug and Release, including transcription parsing, safe source modes, structured synthesis/source IDs, usage accounting, cancellation, rate limits and timeout behavior.
 - 32 iOS persistence/coordinator tests pass, including block recovery and undo/redo, source moves and repeated validation, stale queued captures, explicit priority, cancellation, dismissal suppression, follow-up references and offline stale examples.
@@ -83,3 +83,11 @@ Recall currently indexes dated, spatially anchored typed meeting excerpts. It do
 Use **Explicit only** for the essential demo. The [versioned held-out synthetic diagnostic](evaluations/pause-v1/REPORT.md) matched 9/12 expected routes and exposed unwanted clarification/activity pins on ordinary notes and negation. No prompts or thresholds were tuned. Real-handwriting accuracy and interruption burden remain unmeasured; the 24 fictional font-rendered examples are collection prompts, not human handwriting evidence. Those results describe the frozen baseline. The current branch keeps automatic clarification in a quiet Review control and can run research directly from recognised text; explicit research still requires a separately reviewed query. The baseline pin counts do not validate the current response UI.
 
 Recall verification: 28 Foundation tests and 42 iPad model/coordinator tests pass in the shared workspace, including prepared-question ranking, metadata refresh without re-embedding, private-query isolation and persisted anchor invalidation. The simulator Recall navigation test passes; its screenshot was inspected for region alignment. Combined live web research was not exercised in this session.
+
+## Scout response review · 20 October 2026
+
+The response card now bounds its complete layout inside the visible canvas, scrolls the full transcript/answer/caveat and keeps Insert and Review outside the scrolling text. Canvas insertion uses the inspector’s source validation, placement and undo path. Tapping the status opens an explanation and mode controls; “watching notes” does not mean microphone recording. Automatic none/clarify decisions do not open a response card; unclear text remains available through Review. Background captures no longer publish a user lasso selection, so a quiet decision cannot leave an unsolicited Ask Scout lasso control. The existing Decisions prompt and confidence threshold are unchanged.
+
+Foundation Debug and Release suites each pass 30 tests. The iPad model/coordinator suite passes 49 tests. Credential-launcher, secret-guard and frozen-evaluation hash/summary checks pass. The final UI rerun is recorded below when complete. No new live API or physical handwriting result is inferred from fixtures or simulator checks. The notebook intentionally forces its light theme even when a test requests system dark appearance.
+
+An all-tests run exposed an existing canvas failure in `testWritingBeyondStartingPageInEveryDirection`: after navigating to the left of the original page, the attempted stroke creates neither visible ink nor undo history. The same test fails at the same destination `(0.2, 0.8)` on frozen main `29e27b9`, using the same canvas extent implementation and unchanged `CanvasInputTests.swift`. The subsequent `InkCanvas.swift` change only separates background captures from user lasso selections. This remains an open canvas-coordinate issue; the complete suite is not green. The final Scout-focused run excludes that single reproduced failure explicitly.

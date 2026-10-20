@@ -22,8 +22,10 @@ final class DemoAssistanceTests: XCTestCase {
         XCTAssertTrue(publicQuestion.waitForExistence(timeout: 5))
         publicQuestion.tap()
         publicQuestion.typeText("What is a retention policy?")
+        if app.buttons["Hide keyboard"].exists { app.buttons["Hide keyboard"].tap() }
         let research = app.buttons["researchPublicQuestion"]
         reveal(research, in: app)
+        XCTAssertTrue(research.isEnabled)
         research.tap()
         let insert = app.buttons["insertAIBlock"]
         reveal(insert, in: app)
@@ -104,7 +106,7 @@ final class DemoAssistanceTests: XCTestCase {
     }
 
     @MainActor
-    func testCanvasResponseCardWithLargeTextAndDarkMode() throws {
+    func testCanvasResponseCardWithLargeTextAndRequestedDarkAppearance() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--offline-demo", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-AppleInterfaceStyle", "Dark"]
         app.launch()
@@ -136,14 +138,24 @@ final class DemoAssistanceTests: XCTestCase {
         XCTAssertLessThanOrEqual(end.frame.maxY, scroll.frame.maxY + 2)
         XCTAssertTrue(app.buttons["insertCanvasAIBlock"].isHittable)
         let portrait = XCTAttachment(screenshot: app.screenshot())
-        portrait.name = "Scout canvas response · large text dark portrait"
+        portrait.name = "Scout canvas response · large text portrait · requested dark appearance"
         portrait.lifetime = .keepAlways
         add(portrait)
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
+        let rotated = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            app.frame.width > app.frame.height
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [rotated], timeout: 5), .completed)
+        for _ in 0..<12 {
+            if end.isHittable && end.frame.maxY <= scroll.frame.maxY { break }
+            scroll.swipeUp()
+        }
+        XCTAssertTrue(end.isHittable)
+        XCTAssertLessThanOrEqual(end.frame.maxY, scroll.frame.maxY + 2)
         XCTAssertTrue(app.buttons["assistancePin"].isHittable)
         let landscape = XCTAttachment(screenshot: app.screenshot())
-        landscape.name = "Scout canvas response · large text dark landscape"
+        landscape.name = "Scout canvas response · large text landscape · requested dark appearance"
         landscape.lifetime = .keepAlways
         add(landscape)
         XCTAssertTrue(app.buttons["insertCanvasAIBlock"].isHittable)
@@ -167,7 +179,7 @@ final class DemoAssistanceTests: XCTestCase {
         status.tap()
         XCTAssertTrue(app.staticTexts["scoutStatusExplanation"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["scoutStatusExplanation"].label.contains("does not record audio"))
-        let mode = app.buttons["modePicker"]
+        let mode = app.descendants(matching: .any).matching(identifier: "modePicker").firstMatch
         reveal(mode, in: app)
         mode.tap()
         app.buttons["Automatic"].tap()
@@ -178,7 +190,7 @@ final class DemoAssistanceTests: XCTestCase {
     }
 
     @MainActor
-    private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
+    private func reveal(_ element: XCUIElement, in app: XCUIElement) {
         for _ in 0..<6 {
             if element.exists && element.isHittable { return }
             app.swipeUp()

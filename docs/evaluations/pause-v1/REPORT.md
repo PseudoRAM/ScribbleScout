@@ -2,6 +2,8 @@
 
 **Recommendation: use Explicit only for the essential demo. Do not present Automatic as validated for handwriting.** The frozen synthetic diagnostic produced unwanted final pins on 4 of 6 regions labelled quiet, despite correct transcription. Explicit request priority and the reviewed public query boundary passed the frozen coordinator checks. No prompt, confidence threshold, pause or cooldown was tuned.
 
+Current-branch note: these pin counts and public-query controls describe the frozen baseline below. Later automatic responses and the status/Insert/Review UI are described in [the demo review](../../DEMO.md#scout-response-review--20-october-2026); their behavior must not inherit these baseline measurements.
+
 BIL-18 is partially evaluated; its real-handwriting acceptance criterion remains open. BIL-29's 20–30 human regions, manual citation checking and broader diagnostic remain outstanding. There were no existing human samples available; the user confirmed this. Prepared examples are fictional font renderings, not captured handwriting.
 
 ## Inputs and versions
