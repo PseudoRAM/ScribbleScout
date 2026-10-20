@@ -443,6 +443,7 @@ private final class NotebookCanvasView: PKCanvasView {
     var pageSize = NotebookPage.size
     private(set) var worldBounds = CGRect.zero
     private(set) var updatingExtent = false
+    var isUsingTool = false
     private var previousFitZoom: CGFloat = 0
     var fitZoomScale: CGFloat { min(1, max(0.25, bounds.width / pageSize.width)) }
     var visibleRect: CGRect {
@@ -471,8 +472,13 @@ private final class NotebookCanvasView: PKCanvasView {
                             height: ceil(padded.maxY / 1024) * 1024 - floor(padded.minY / 1024) * 1024)
         worldBounds = worldBounds.union(extent)
         let offset = contentOffset
-        // PencilKit owns its drawable content size. Resizing it during a stroke cancels live ink.
-        // Grow only the scroll margins, leaving the native drawing and zoom geometry stable.
+        // Insets allow navigation, but PencilKit also needs a drawable surface beyond the page.
+        // Reserve it ahead of the viewport, and never resize while a tool is touching the canvas.
+        if !isUsingTool {
+            let size = CGSize(width: max(pageSize.width, worldBounds.maxX) * zoomScale,
+                              height: max(pageSize.height, worldBounds.maxY) * zoomScale)
+            if contentSize != size { contentSize = size }
+        }
         let inset = UIEdgeInsets(top: -worldBounds.minY * zoomScale, left: -worldBounds.minX * zoomScale,
                                  bottom: max(0, worldBounds.maxY * zoomScale - contentSize.height),
                                  right: max(0, worldBounds.maxX * zoomScale - contentSize.width))
@@ -671,7 +677,20 @@ struct InkCanvas: UIViewRepresentable {
         private var pendingOverview: DispatchWorkItem?
         init(session: NoteSession, controls: CanvasControls) { self.session = session; self.controls = controls }
 
+        func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) {
+            (canvasView as? NotebookCanvasView)?.isUsingTool = true
+        }
+
+        func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
+            guard let canvas = canvasView as? NotebookCanvasView else { return }
+            canvas.isUsingTool = false
+            canvas.expand(toInclude: canvas.occupiedRect.union(canvas.visibleRect))
+        }
+
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
+            if let canvas = canvasView as? NotebookCanvasView {
+                canvas.expand(toInclude: canvas.occupiedRect.union(canvas.visibleRect))
+            }
             // Keep an emptied canvas ready for the next Pencil stroke, including after undo.
             if canvasView.window != nil && canvasView.drawing.strokes.isEmpty {
                 canvasView.becomeFirstResponder()
