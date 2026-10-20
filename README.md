@@ -122,6 +122,8 @@ There is no cloud sync, analytics, AI processing, or note transmission. Storage 
 
 ## Tests
 
+Unit and persistence tests use Apple's [Swift Testing](https://developer.apple.com/documentation/testing) framework, included with Xcode. Use `@Test`, `#expect`, and `#require` for new tests; use XCTest / XCUIAutomation when adding UI or performance tests. No third-party testing packages are needed.
+
 Run **Product → Test** (⌘U) in Xcode, or use an installed simulator:
 
 ```sh
@@ -130,13 +132,19 @@ xcodebuild -project ScribbleScout.xcodeproj -scheme ScribbleScout \
   -derivedDataPath build CODE_SIGNING_ALLOWED=NO test
 ```
 
-Choose a simulator available on your Mac if that model is not installed. **Five tests pass**, using real PencilKit strokes to verify:
+Choose a simulator available on your Mac if that model is not installed. The suite uses real PencilKit strokes and a separate temporary storage directory per test, so tests can run in parallel without sharing saved notes. It covers:
 
 - Ink, text, paper, and viewport round trips, with separate notes kept isolated.
 - Recovery from damaged metadata and an interrupted ink write.
 - Recovery from a corrupt latest drawing.
 - Retention of only the current and previous drawing snapshots.
-- Preservation of in-memory edits when saving fails.
+- Preservation of in-memory edits when saving fails, and successful retry after storage becomes available.
+- Round trips for every paper style.
+- Recovery from missing drawings, mismatched note IDs, and invalid drawing paths.
+- Library ordering and warnings while preserving unreadable files.
+- Autosave of the latest text and ink; viewport saves preserve the edit date and reuse ink.
+
+The **Swift tests** GitHub Actions workflow runs on pushes and pull requests with Xcode 26.2 and an iPad simulator. It collects code coverage and uploads `Testing.xcresult`, which you can download and open in Xcode to inspect failures and coverage. To collect coverage locally, add `-enableCodeCoverage YES -resultBundlePath build/Testing.xcresult` to the command above; remove the previous result bundle before reusing that path. Use coverage to find missed behavior, rather than aiming for a percentage.
 
 For a hands-on device check: create two notes, write and erase ink, undo/redo, zoom and scroll, switch notes, then background and relaunch. Confirm that the ink, typed text, and viewport survive.
 
