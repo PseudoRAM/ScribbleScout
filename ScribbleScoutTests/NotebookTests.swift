@@ -8,6 +8,57 @@ import SwiftUI
 struct NotebookTests {
     @MainActor
     @Test
+    func deletingOpenNoteCancelsPendingSavesAndExamplesStayDeleted() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = LocalNotebook(root: root)
+        let store = NotebookStore(repository: repository)
+        let initialIDs = Set(store.notes.map(\.id))
+        #expect(initialIDs.count == 4)
+        let session = try #require(store.current)
+        session.edit { $0.text = "Pending edit before deletion" }
+        store.delete(initialIDs)
+        #expect(store.notes.isEmpty)
+        #expect(store.current == nil)
+        session.setViewport(PageViewport(zoom: 2, x: 5, y: 8))
+        session.edit { $0.title = "Late canvas update" }
+        #expect(session.flush())
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(try repository.list().notes.isEmpty)
+        #expect(NotebookStore(repository: repository).notes.isEmpty)
+        for id in initialIDs {
+            #expect(!FileManager.default.fileExists(atPath: repository.folder(for: id).path))
+        }
+        store.create()
+        #expect(store.notes.count == 1)
+        #expect(store.current != nil)
+    }
+
+    @MainActor
+    @Test
+    func deletionKeepsUnselectedNotesAndReportsFailures() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = LocalNotebook(root: root)
+        let store = NotebookStore(repository: repository)
+        store.create()
+        let kept = try #require(store.current)
+        kept.edit { $0.title = "Keep me" }
+        #expect(kept.flush())
+        let others = store.notes.filter { $0.id != kept.id }
+        let missing = try #require(others.first)
+        try repository.delete(missing.id)
+        store.delete(Set(others.map(\.id)))
+        #expect(store.notes.map(\.id).contains(kept.id))
+        #expect(store.notes.map(\.id).contains(missing.id))
+        #expect(store.current?.id == kept.id)
+        #expect(store.issue?.contains("couldn’t be deleted") == true)
+        #expect(try repository.list().notes.map(\.id) == [kept.id])
+        #expect(try repository.load(kept.id).note.title == "Keep me")
+    }
+
+    @MainActor
+    @Test
     func datedMeetingRenameRetainsBoundsAndTextEditRemovesStaleAnchors() throws {
         try withRepository { repository in
             let meeting = NoteRecord.fictionalMeetings[0]

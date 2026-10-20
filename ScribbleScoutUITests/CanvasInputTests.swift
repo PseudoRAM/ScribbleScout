@@ -133,7 +133,7 @@ final class CanvasInputTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["No notes found"].waitForExistence(timeout: 10))
         app.buttons["Clear search"].tap()
         XCTAssertTrue(app.buttons[noteID].waitForExistence(timeout: 5))
-        app.buttons["Close notebook"].tap()
+        app.buttons["backToNote"].tap()
         app.buttons["Open notebook"].tap()
         app.buttons["newNote"].tap()
         XCTAssertEqual(app.textFields["noteTitle"].value as? String, "Untitled note")
@@ -151,14 +151,62 @@ final class CanvasInputTests: XCTestCase {
         app.launchArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         app.launch()
         app.buttons["Open notebook"].tap()
-        XCTAssertTrue(app.buttons["Close notebook"].isHittable)
-        Thread.sleep(forTimeInterval: 1) // Capture the open drawer after its entrance animation.
+        XCTAssertTrue(app.buttons["backToNote"].isHittable)
+        Thread.sleep(forTimeInterval: 1) // Capture the full-page library at the largest text size.
         XCTAssertGreaterThanOrEqual(app.textFields["Find a note"].frame.minX, 0)
         XCTAssertLessThanOrEqual(app.textFields["Find a note"].frame.maxX, app.frame.maxX)
         let largeType = XCTAttachment(screenshot: app.screenshot())
         largeType.name = "Notebook navigation accessibility text"
         largeType.lifetime = .keepAlways
         add(largeType)
+    }
+
+    @MainActor
+    func testLibraryBulkDeletionAndCancel() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--offline-demo"]
+        app.launch()
+        let query = "LibraryCheck" + UUID().uuidString.prefix(8)
+        if app.buttons["Open notebook"].isHittable { app.buttons["Open notebook"].tap() }
+        for suffix in ["One", "Two"] {
+            app.buttons["newNote"].tap()
+            let title = app.textFields["noteTitle"]
+            title.tap()
+            title.typeText(query + suffix)
+            app.buttons["Open notebook"].tap()
+        }
+        let search = app.textFields["Find a note"]
+        search.tap()
+        search.typeText(query)
+        let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "note-"))
+        XCTAssertTrue(cards.firstMatch.waitForExistence(timeout: 10))
+        XCTAssertEqual(cards.count, 2)
+        if app.buttons["Hide keyboard"].exists { app.buttons["Hide keyboard"].tap() }
+        let firstID = cards.firstMatch.identifier
+        app.buttons["delete-" + firstID.dropFirst(5)].tap()
+        XCTAssertTrue(app.alerts.firstMatch.waitForExistence(timeout: 3))
+        app.alerts.buttons["Cancel"].tap()
+        XCTAssertEqual(cards.count, 2)
+        app.buttons["selectNotes"].tap()
+        app.buttons["Select all shown"].tap()
+        XCTAssertTrue(app.staticTexts["2 selected"].exists)
+        app.buttons["deleteSelectedNotes"].tap()
+        XCTAssertTrue(app.alerts.firstMatch.waitForExistence(timeout: 3))
+        app.alerts.buttons["Cancel"].tap()
+        XCTAssertEqual(cards.count, 2)
+        let selected = XCTAttachment(screenshot: app.screenshot())
+        selected.name = "Full-page library bulk selection"
+        selected.lifetime = .keepAlways
+        add(selected)
+        app.buttons["deleteSelectedNotes"].tap()
+        app.alerts.buttons["Delete"].tap()
+        XCTAssertTrue(app.staticTexts["No notes found"].waitForExistence(timeout: 10))
+        app.terminate()
+        app.launch()
+        if app.buttons["Open notebook"].isHittable { app.buttons["Open notebook"].tap() }
+        app.textFields["Find a note"].tap()
+        app.textFields["Find a note"].typeText(query)
+        XCTAssertTrue(app.staticTexts["No notes found"].waitForExistence(timeout: 10))
     }
 
     private func ink(in image: UIImage, includeDarkInk: Bool = false) throws -> (count: Int, centerY: Double) {

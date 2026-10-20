@@ -57,6 +57,10 @@ struct LocalNotebook {
         return (notes.sorted { $0.updatedAt > $1.updatedAt }, warnings)
     }
 
+    func delete(_ id: UUID) throws {
+        try FileManager.default.removeItem(at: folder(for: id))
+    }
+
     /// Commit the ink first, then atomically publish metadata pointing at that immutable ink.
     /// A crash between those writes leaves the previous complete snapshot readable.
     func save(_ record: NoteRecord, drawing: PKDrawing, inkChanged: Bool) throws -> NoteRecord {
@@ -102,6 +106,7 @@ final class NoteSession: ObservableObject, Identifiable {
     private var savedRevision: Int
     private var pendingSave: Task<Void, Never>?
     private var dirty = false
+    private var discarded = false
     var onSave: ((NoteRecord) -> Void)?
     var onSearchableChange: (() -> Void)?
 
@@ -115,6 +120,7 @@ final class NoteSession: ObservableObject, Identifiable {
     }
 
     func edit(_ change: (inout NoteRecord) -> Void) {
+        guard !discarded else { return }
         var updated = note
         change(&updated)
         if updated.text != storedNote.text { updated.meetingEvidence = nil }
@@ -174,12 +180,13 @@ final class NoteSession: ObservableObject, Identifiable {
     }
 
     func setDrawing(_ value: PKDrawing) {
+        guard !discarded else { return }
         drawing = value
         edit { $0.drawingRevision += 1 }
     }
 
     func setViewport(_ value: PageViewport) {
-        guard value != viewport else { return }
+        guard !discarded, value != viewport else { return }
         // Navigation persists without invalidating the entire note editor each frame.
         viewport = value
         scheduleSave(updateStatus: false)
@@ -195,8 +202,17 @@ final class NoteSession: ObservableObject, Identifiable {
         }
     }
 
+    /// A dismissed canvas may still report viewport changes; never recreate a deleted note.
+    func discard() {
+        discarded = true
+        pendingSave?.cancel()
+        onSave = nil
+        onSearchableChange = nil
+    }
+
     @discardableResult
     func flush() -> Bool {
+        guard !discarded else { return true }
         pendingSave?.cancel()
         guard dirty || note.drawingFile == nil else { return true }
         do {
@@ -235,29 +251,28 @@ final class NotebookStore: ObservableObject {
         return notes.map { $0.id == current.id ? current.note : $0 }
     }
 
-    init() {
+    init(repository suppliedRepository: LocalNotebook? = nil) {
         do {
-            let repository = try LocalNotebook.applicationStore()
+            let repository = try suppliedRepository ?? LocalNotebook.applicationStore()
             self.repository = repository
             semanticSearch = LocalSemanticSearch(cacheURL: repository.root.appendingPathComponent("search-index.json"))
             let listing = try repository.list()
             notes = listing.notes
-            for meeting in NoteRecord.fictionalMeetings where !notes.contains(where: { $0.id == meeting.id }) {
-                let example = NoteSession(note: meeting, drawing: PKDrawing(), repository: repository)
-                if example.flush() { notes.append(example.note) }
-                else { issue = example.saveError }
-            }
-            if !listing.warnings.isEmpty { issue = listing.warnings.joined(separator: "\n\n") }
-            // Install the reference page once; existing notes and their last-opened page stay intact.
-            if !notes.contains(where: { $0.template == .checkout }) {
-                let example = NoteSession(note: .checkoutExample, drawing: PKDrawing(), repository: repository)
-                if example.flush() {
-                    notes.insert(example.note, at: 0)
-                    install(example)
-                    return
+            // Seed once per library, so deliberately deleted examples never return.
+            let marker = repository.root.appendingPathComponent(".examples-installed")
+            if !FileManager.default.fileExists(atPath: marker.path) {
+                for example in NoteRecord.fictionalMeetings + [NoteRecord.checkoutExample] {
+                    let exists = example.template == .checkout
+                        ? notes.contains { $0.template == .checkout }
+                        : notes.contains { $0.id == example.id }
+                    if !exists {
+                        notes.append(try repository.save(example, drawing: PKDrawing(), inkChanged: true))
+                    }
                 }
-                issue = example.saveError
+                try Data().write(to: marker, options: .atomic)
             }
+            notes.sort { $0.updatedAt > $1.updatedAt }
+            if !listing.warnings.isEmpty { issue = listing.warnings.joined(separator: "\n\n") }
             let lastID = UserDefaults.standard.string(forKey: "lastNote").flatMap(UUID.init(uuidString:))
             if let note = notes.first(where: { $0.id == lastID }) ?? notes.first { open(note.id) }
             else { search("") }
@@ -265,7 +280,8 @@ final class NotebookStore: ObservableObject {
     }
 
     func open(_ id: UUID) {
-        guard current?.id != id, current?.flush() != false, let repository else { return }
+        guard current?.id != id, let repository else { return }
+        guard current?.flush() != false else { issue = current?.saveError; return }
         do {
             let value = try repository.load(id)
             install(NoteSession(note: value.note, drawing: value.drawing, repository: repository))
@@ -273,12 +289,34 @@ final class NotebookStore: ObservableObject {
     }
 
     func create() {
-        guard current?.flush() != false, let repository else { return }
+        guard let repository else { return }
+        guard current?.flush() != false else { issue = current?.saveError; return }
         let note = NoteRecord()
         let session = NoteSession(note: note, drawing: PKDrawing(), repository: repository)
         guard session.flush() else { issue = session.saveError; return }
         notes.insert(session.note, at: 0)
         install(session)
+    }
+
+    /// Remove only successfully deleted records; failures leave the remaining notes usable.
+    func delete(_ ids: Set<UUID>) {
+        guard let repository else { return }
+        var failures: [String] = []
+        for note in notes where ids.contains(note.id) {
+            do {
+                try repository.delete(note.id)
+                if current?.id == note.id {
+                    current?.discard()
+                    current = nil
+                    UserDefaults.standard.removeObject(forKey: "lastNote")
+                }
+                notes.removeAll { $0.id == note.id }
+            } catch {
+                failures.append("“\(note.title)” couldn’t be deleted. \(error.localizedDescription)")
+            }
+        }
+        search(searchQuery)
+        if !failures.isEmpty { issue = failures.joined(separator: "\n\n") }
     }
 
     private func install(_ session: NoteSession) {
