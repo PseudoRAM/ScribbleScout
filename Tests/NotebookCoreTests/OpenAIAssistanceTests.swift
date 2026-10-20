@@ -82,6 +82,47 @@ struct OpenAIAssistanceTests {
         #expect(value.text == "📝 A [Docs](<https://example.com/docs>) end")
     }
 
+    @Test func recognitionIsStructuredAndDoesNotAnswerOrSearch() throws {
+        let body = OpenAIAssistance.recognitionBody(Data([1, 2, 3]))
+        #expect(body["tools"] == nil)
+        #expect(body["store"] as? Bool == false)
+        #expect((body["instructions"] as? String)?.contains("Do not answer") == true)
+        let format = (body["text"] as? [String: Any])?["format"] as? [String: Any]
+        #expect(format?["strict"] as? Bool == true)
+        let result = try OpenAIAssistance.parseRecognition(data(response("{\"text\":\"Do not research [unclear]\",\"uncertainty\":[\"product acronym\"]}")))
+        #expect(result.text == "Do not research [unclear]")
+        #expect(result.uncertainty == ["product acronym"])
+        #expect(throws: AssistanceError.invalidResponse) {
+            try OpenAIAssistance.parseRecognition(data(response("{\"text\":\"\",\"uncertainty\":[]}")))
+        }
+    }
+
+    @Test func ledgerRecordsReportedUsageFallbackAndFailureWithoutEstimatingTokens() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [StubOpenAI.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let ledger = UsageLedger()
+        let provider = OpenAIAssistance(apiKey: "synthetic-test-key", session: session, ledger: ledger)
+        StubOpenAI.handler = { request in
+            if request.url?.path == "/v1/decisions" { return (404, Data()) }
+            var value = response("{\"route\":\"quick_response\"}")
+            value["usage"] = ["input_tokens": 17, "output_tokens": 9]
+            return (200, try data(value))
+        }
+        _ = try await provider.route("Explain retention")
+        let entries = await ledger.entries
+        #expect(entries.map(\.operation) == [.routing, .routingFallback])
+        #expect(entries.map(\.succeeded) == [false, true])
+        #expect(entries.allSatisfy { !$0.requestID.isEmpty && $0.latencySeconds >= 0 })
+        let summary = await ledger.summary
+        #expect(summary.requests == 2)
+        #expect(summary.inputTokens == 17 && summary.outputTokens == 9)
+        #expect(summary.unreportedTokenRequests == 1)
+        await #expect(throws: AssistanceError.invalidInput) { try await provider.recognise(image: Data()) }
+        #expect(await ledger.entries.count == 2)
+    }
+
     @Test func unsupportedDecisionsFallsBackButBadCredentialsDoNot() async throws {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [StubOpenAI.self]
