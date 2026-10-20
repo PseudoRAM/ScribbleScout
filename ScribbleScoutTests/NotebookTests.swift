@@ -4,6 +4,58 @@ import PencilKit
 
 @Suite("Notebook persistence and editing")
 struct NotebookTests {
+    @Test
+    func testOnDeviceSearchPersistsAndRebuildsItsDisposableCache() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = root.appendingPathComponent("search-index.json")
+        let document = NoteSearchDocument(id: UUID(), title: "Dog care", text: "Take the puppy outside for a walk.")
+        let service = LocalSemanticSearch(cacheURL: cache)
+        let first = try await service.search("puppy", documents: [document])
+        #expect(first.matches.first?.id == document.id)
+        let savedData = try Data(contentsOf: cache)
+        let saved = try JSONDecoder().decode(NoteSearchIndex.self, from: savedData)
+        #expect(saved.entries[document.id]?.text == document.text)
+        let semantic = try await service.search("Walk the dog", documents: [document])
+        if saved.dimensions > 0 {
+            #expect(semantic.matches.first?.id == document.id)
+            #expect(first.status.contains("On-device meaning"))
+        } else {
+            #expect(first.status.contains("model unavailable"))
+        }
+        _ = try await service.search("puppy", documents: [document])
+        #expect(try Data(contentsOf: cache) == savedData, "Unchanged text must not rewrite the cache")
+        let reopened = try await LocalSemanticSearch(cacheURL: cache).search("puppy", documents: [document])
+        #expect(reopened.matches.first?.id == document.id)
+
+        try Data("damaged cache".utf8).write(to: cache)
+        let rebuilt = try await LocalSemanticSearch(cacheURL: cache).search("puppy", documents: [document])
+        #expect(rebuilt.matches.first?.id == document.id)
+        let empty = try await service.search("puppy", documents: [])
+        #expect(empty.matches.isEmpty)
+        let removed = try JSONDecoder().decode(NoteSearchIndex.self, from: Data(contentsOf: cache))
+        #expect(removed.entries.isEmpty)
+    }
+
+    @MainActor
+    @Test
+    func testOnlySearchableEditsRequestIndexRefresh() throws {
+        try withRepository { repository in
+            let session = NoteSession(note: NoteRecord(), drawing: PKDrawing(), repository: repository)
+            var refreshes = 0
+            session.onSearchableChange = { refreshes += 1 }
+            session.edit { $0.text = "New searchable text" }
+            session.edit { $0.title = "Renamed" }
+            #expect(refreshes == 2)
+            session.edit { $0.text = "New searchable text" }
+            session.edit { $0.paper = .blank }
+            session.setDrawing(drawing())
+            session.setViewport(PageViewport(zoom: 2, x: 20, y: 30))
+            #expect(session.flush())
+            #expect(refreshes == 2)
+        }
+    }
+
     private func drawing() -> PKDrawing {
         let points = [CGPoint(x: 80, y: 100), CGPoint(x: 160, y: 140), CGPoint(x: 240, y: 100)]
         let path = PKStrokePath(controlPoints: points.enumerated().map { index, point in
