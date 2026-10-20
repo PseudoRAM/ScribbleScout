@@ -24,6 +24,31 @@ struct AssistanceRecordsTests {
         #expect(!suggestion.hasValidEvidence)
     }
 
+    @Test func fixtureAndLiveSourcesCannotCrossAndRecallNeedsAnchoredEvidence() {
+        let region = NoteRegion(canvasID: UUID(), revision: 1, bounds: CanvasBounds(), sourceHash: "source")
+        var suggestion = Suggestion(request: AssistanceRequest(region: region, intent: .recall, sourceMode: .notes, question: "Previous meeting?"), answer: "Decision", evidence: [], state: .ready)
+        #expect(!suggestion.hasValidEvidence)
+        suggestion.evidence = [Evidence(kind: .fixture, title: "Synthetic", excerpt: "Demo")]
+        #expect(!suggestion.hasValidEvidence)
+        suggestion.isFixture = true
+        #expect(suggestion.hasValidEvidence)
+        suggestion.evidence = [Evidence(kind: .note, title: "Real note", excerpt: "Decision", canvasID: region.canvasID, bounds: region.bounds)]
+        #expect(!suggestion.hasValidEvidence)
+        suggestion.isFixture = false
+        #expect(suggestion.hasValidEvidence)
+    }
+
+    @Test func groundedFixtureExercisesResearchAndQuickAnswerRoutes() async throws {
+        let provider = FixtureProvider()
+        let recognition = try await provider.recognise(image: Data([1]))
+        #expect(try await provider.route(recognition.text).route == .webResearch)
+        #expect(try await provider.route("Explain retention").route == .quickResponse)
+        #expect(try await provider.route("Do not research retention").route == .none)
+        #expect(try await provider.route("Find our previous notes").route == .recall)
+        let result = try await provider.answer(recognition.text, research: true)
+        #expect(!result.caveat.isEmpty && result.evidence.allSatisfy { $0.kind == .fixture })
+    }
+
     @Test func fixtureScenariosAreLocalLabelledAndExcludedFromLiveUsage() async throws {
         let ledger = UsageLedger()
         for scenario in FixtureScenario.allCases {

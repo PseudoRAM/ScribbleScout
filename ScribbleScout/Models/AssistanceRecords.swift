@@ -37,7 +37,7 @@ struct Evidence: Codable, Equatable, Sendable, Identifiable {
             guard let url else { return false }
             return ["https", "http"].contains(url.scheme?.lowercased() ?? "") && url.host != nil && url.user == nil && url.password == nil
         case .note: return canvasID != nil && bounds != nil && !excerpt.isEmpty
-        case .fixture: return !excerpt.isEmpty
+        case .fixture: return url == nil && !excerpt.isEmpty
         }
     }
 }
@@ -83,7 +83,7 @@ extension AssistanceProvider {
     func route(_ text: String) async throws -> RoutingDecision { try await route(text, image: nil) }
     func answer(_ text: String, research: Bool) async throws -> AssistanceAnswer { try await answer(text, research: research, image: nil) }
 }
-enum UsageOperation: String, Codable, Sendable { case recognition, routing, routingFallback, answer, research }
+enum UsageOperation: String, Codable, Sendable { case recognition, routing, routingFallback, answer, research, synthesis }
 struct UsageEntry: Codable, Equatable, Sendable, Identifiable {
     var id = UUID()
     var operation: UsageOperation
