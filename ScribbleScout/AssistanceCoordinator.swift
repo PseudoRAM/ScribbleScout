@@ -4,6 +4,20 @@ import SwiftUI
 @MainActor
 final class AssistanceCoordinator: ObservableObject {
     enum Stage { case compose, inspect, review, result }
+    enum WorkPhase {
+        case reading, deciding, answering, researching, recalling
+        var isAction: Bool { self != .reading && self != .deciding }
+        var label: String {
+            switch self {
+            case .reading: "Reading handwriting…"
+            case .deciding: "Checking how to help…"
+            case .answering: "Writing an explanation…"
+            case .researching: "Researching the public question…"
+            case .recalling: "Searching dated notes on this iPad…"
+            }
+        }
+    }
+    @Published private(set) var workPhase: WorkPhase?
     @Published var stage: Stage = .compose
     @Published var transcript = ""
     @Published var publicQuestion = ""
@@ -12,14 +26,17 @@ final class AssistanceCoordinator: ObservableObject {
     @Published private(set) var region: NoteRegion?
     @Published private(set) var decision: RoutingDecision?
     @Published private(set) var suggestion: Suggestion?
+    @Published private(set) var streamingText = ""
     @Published private(set) var activity: String?
     @Published private(set) var message: String?
     @Published private(set) var usage = UsageSummary()
     @Published private(set) var mutedUntil: Date?
     var resolveSource: ((NoteRegion) -> NoteRegion?)?
+    var recallSearch: ((String) async throws -> [Evidence])?
     var providerFactory: ((ScoutSession) -> any AssistanceProvider)?
     var pauseDelay: Duration = .milliseconds(1800)
     var automaticCooldown: TimeInterval = 20
+    var automaticallyAnswer = true
     private var task: Task<Void, Never>?
     private var pause: Task<Void, Never>?
     private var generation = UUID()
@@ -52,14 +69,20 @@ final class AssistanceCoordinator: ObservableObject {
         self.region = region
         transcript = selection == nil ? region.recognisedText : ""
         publicQuestion = ""; decision = nil; suggestion = nil; message = nil; retainedEvidence = []
+        streamingText = ""
         stage = selection == nil ? .inspect : .compose
+    }
+
+    func ask(_ selection: CanvasSelection, using settings: ScoutSession) {
+        prepare(selection, region: selection.region)
+        recognise(using: settings, automatically: settings.mode == .automatic)
     }
 
     func recognise(using settings: ScoutSession, automatically: Bool = false) {
         guard let selection, let region, validate(region) else { return }
         automatic = automatically
-        run("Reading handwriting…", settings: settings) { provider in
-            let result = try await provider.recognise(image: selection.png)
+        run(.reading, settings: settings) { provider in
+            let result = try await provider.recognise(image: selection.png, context: selection.contextPNG)
             try Task.checkCancellation()
             guard self.validate(region) else { return }
             self.transcript = result.text
@@ -73,7 +96,11 @@ final class AssistanceCoordinator: ObservableObject {
                     return
                 }
             }
-            if automatically { self.route(using: settings, afterCurrent: true) }
+            if automatically && result.uncertainty.isEmpty && !result.text.contains("[unclear]") {
+                self.route(using: settings, afterCurrent: true)
+            } else if automatically {
+                self.message = "Some handwriting is unclear. Review the transcript before Scout continues."
+            }
         }
     }
 
@@ -83,18 +110,17 @@ final class AssistanceCoordinator: ObservableObject {
         if afterCurrent { activity = nil; task = nil }
         self.region?.recognisedText = transcript
         let input = transcript
-        run("Checking how to help…", settings: settings) { provider in
-            let result = try await provider.route(input)
+        run(.deciding, settings: settings) { provider in
+            let result = try await provider.route(input, image: self.selection?.contextPNG)
             try Task.checkCancellation()
             guard self.validate(region) else { return }
             self.decision = result
             self.stage = .review
-            self.publicQuestion = "" // A public query is always written and approved separately.
+            self.publicQuestion = "" // Explicit research still uses a separately reviewed question.
             switch result.route {
             case .webResearch: self.message = "Review a public question before research. No web search has started."
             case .recall:
-                self.message = "Use Find a note in the notebook menu to search private history. Public web search cannot answer this."
-                self.region = nil
+                self.message = "Search dated local notes. Public research uses a separate public question."
             case .clarify: self.message = "Check the transcription and add the subject or missing context."
             case .none:
                 self.message = "No assistance needed. Keep writing."
@@ -102,36 +128,101 @@ final class AssistanceCoordinator: ObservableObject {
             case .quickResponse: self.message = "The corrected text is ready for a quick answer."
             }
             self.suggestion = self.makeSuggestion(answer: "", state: .needsContext, evidence: [], fixture: settings.offline)
+            if self.automatic && self.automaticallyAnswer {
+                switch result.route {
+                case .quickResponse, .webResearch:
+                    self.activity = nil; self.task = nil
+                    if result.route == .webResearch { self.publicQuestion = input }
+                    self.answer(using: settings, research: result.route == .webResearch, automatically: true)
+                case .recall:
+                    self.activity = nil; self.task = nil
+                    self.recall(automatically: true, settings: settings)
+                case .clarify, .none: break
+                }
+            }
         }
     }
 
-    func answer(using settings: ScoutSession, research: Bool, followUp: Bool = false) {
+    func recall(automatically: Bool = false, settings: ScoutSession? = nil) {
+        guard let region, validate(region), let recallSearch, !busy else { return }
+        if !automatically { claimExplicit() }
+        let query = transcript
+        let id = UUID(); generation = id
+        workPhase = .recalling
+        activity = WorkPhase.recalling.label
+        suggestion = nil; message = nil; retainedEvidence = []
+        task = Task { @MainActor in
+            defer {
+                if self.generation == id {
+                    self.activity = nil; self.workPhase = nil; self.task = nil
+                    if let settings, let queued = self.queued, settings.mode == .automatic {
+                        self.queued = nil
+                        self.startAutomatic(queued, settings: settings)
+                    }
+                }
+            }
+            do {
+                let evidence = try await recallSearch(query)
+                try Task.checkCancellation()
+                guard self.generation == id, self.validate(region) else { return }
+                self.retainedEvidence = evidence
+                let answer = evidence.map { "\($0.claim ?? "Note") · \($0.meetingDate?.formatted(date: .abbreviated, time: .omitted) ?? "Undated"): \($0.excerpt)" }.joined(separator: "\n\n")
+                self.suggestion = Suggestion(request: AssistanceRequest(region: region, intent: .recall, sourceMode: .notes, question: query),
+                    answer: answer, caveat: "Local excerpts. Proposals and assumptions are not settled decisions. Fictional meetings are labelled.",
+                    evidence: evidence, state: evidence.isEmpty ? .needsContext : .ready)
+                self.stage = .result
+                if evidence.isEmpty { self.message = "No dated evidence found. Try specific terms from the meeting." }
+            } catch is CancellationError { return }
+            catch { if self.generation == id { self.message = "Local recall failed. Try again." } }
+        }
+    }
+
+    func answer(using settings: ScoutSession, research: Bool, followUp: Bool = false, automatically: Bool = false) {
         guard let region, validate(region) else { return }
-        claimExplicit()
+        if !automatically { claimExplicit() }
         let query = research ? publicQuestion : (followUp ? self.followUp : transcript)
         guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let previous = suggestion
+        let localEvidence = research ? retainedEvidence.filter { $0.kind == .note } : []
         let references = retainedEvidence.map { "\($0.title): \($0.excerpt)" }.joined(separator: "\n")
         let input = followUp && !research ? "Question: \(query)\nPrevious answer: \(previous?.answer ?? "")\nExisting evidence (do not invent new citations):\n\(references)" : query
-        run(research ? "Researching the public question…" : "Writing a quick answer…", settings: settings) { provider in
-            let result = try await provider.answer(input, research: research)
+        streamingText = ""
+        run(research ? .researching : .answering, settings: settings) { provider in
+            let requestGeneration = self.generation
+            let result = try await provider.answer(input, research: research, image: research ? nil : self.selection?.contextPNG) { text in
+                await self.receiveStream(text, generation: requestGeneration, source: region)
+            }
             try Task.checkCancellation()
             guard self.validate(region) else { return }
             var evidence = !result.evidence.isEmpty ? result.evidence : (settings.offline ? FixtureProvider(scenario: settings.scenario).evidence : result.webEvidence())
             if followUp { evidence = self.retainedEvidence + evidence.filter { item in !self.retainedEvidence.contains(where: { $0.url == item.url && $0.title == item.title }) } }
+            evidence = localEvidence + evidence
             self.retainedEvidence = evidence
-            self.suggestion = self.makeSuggestion(answer: result.text, state: result.isStale ? .stale : .ready,
+            let localText = localEvidence.map { "\($0.claim ?? "Note"): \($0.excerpt)" }.joined(separator: "\n\n")
+            let combinedText = localEvidence.isEmpty ? result.text : "Private meeting evidence\n" + localText + "\n\nPublic research\n" + result.text
+            self.suggestion = self.makeSuggestion(answer: combinedText, state: result.isStale ? .stale : .ready,
                                                  evidence: evidence, fixture: settings.offline)
             self.suggestion?.request.question = query
+            if !localEvidence.isEmpty {
+                self.suggestion?.request.sourceMode = .both
+                self.suggestion?.request.intent = .recall
+                self.suggestion?.request.originalQuestion = previous?.request.question
+            }
             if followUp, let previous {
                 self.suggestion?.request.originalQuestion = previous.request.originalQuestion ?? previous.request.question
                 self.suggestion?.request.parentRequestID = previous.request.id
                 self.suggestion?.request.sourceMode = previous.request.sourceMode
             }
             if !result.caveat.isEmpty { self.suggestion?.caveat = result.caveat }
+            self.streamingText = ""
             self.stage = .result
             self.message = result.isStale ? "Fictional stale-source example: select the current content before requesting a new answer." : nil
         }
+    }
+
+    private func receiveStream(_ text: String, generation: UUID, source: NoteRegion) {
+        guard self.generation == generation, !Task.isCancelled, validate(source) else { return }
+        streamingText = text
     }
 
     private func makeSuggestion(answer: String, state: SuggestionState, evidence: [Evidence], fixture: Bool) -> Suggestion? {
@@ -150,6 +241,7 @@ final class AssistanceCoordinator: ObservableObject {
         guard let current = resolveSource?(original) else {
             if suggestion == nil { suggestion = makeSuggestion(answer: "", state: .stale, evidence: [], fixture: false) }
             suggestion?.state = .stale
+            streamingText = ""
             message = "The source changed while Scout was working. Select the current content and recognise it again."
             return false
         }
@@ -182,7 +274,7 @@ final class AssistanceCoordinator: ObservableObject {
     }
     func cancel() {
         if busy { suggestion?.state = .needsContext; message = "Request cancelled. You can retry explicitly; remote processing may continue." }
-        generation = UUID(); task?.cancel(); pause?.cancel(); task = nil; activity = nil; queued = nil
+        generation = UUID(); task?.cancel(); pause?.cancel(); task = nil; activity = nil; workPhase = nil; queued = nil; streamingText = ""
     }
     func stopAutomatic() { pause?.cancel(); queued = nil; if automatic { cancel() } }
 
@@ -199,15 +291,16 @@ final class AssistanceCoordinator: ObservableObject {
               mutedUntil.map({ $0 <= Date() }) ?? true else { return }
         pause = Task { @MainActor in
             try? await Task.sleep(for: self.pauseDelay)
-            guard !Task.isCancelled, settings.mode == .automatic,
-                  Date().timeIntervalSince(self.lastAutomatic) >= self.automaticCooldown, let selection = capture(),
+            let cooldown = self.automaticCooldown - Date().timeIntervalSince(self.lastAutomatic)
+            if cooldown > 0 { try? await Task.sleep(for: .seconds(cooldown)) }
+            guard !Task.isCancelled, settings.mode == .automatic, settings.canProcess, let selection = capture(),
                   !self.seen.contains(selection.region.sourceHash) else { return }
             if self.busy {
                 if self.automatic { self.queued = selection }
                 return
             }
             // An explicit draft or result remains owned by the user until dismissed.
-            guard self.region == nil || self.automatic else { return } // Bounded queue: only the latest changed region.
+            guard self.region == nil || self.automatic || (self.region?.sourceHash.hasPrefix("typed:") == true && self.transcript.isEmpty) else { return } // Bounded queue: only the latest changed region.
             self.startAutomatic(selection, settings: settings)
         }
     }
@@ -220,7 +313,7 @@ final class AssistanceCoordinator: ObservableObject {
     }
     func refreshUsage(_ settings: ScoutSession) async { usage = await settings.ledger.summary }
 
-    private func run(_ label: String, settings: ScoutSession,
+    private func run(_ phase: WorkPhase, settings: ScoutSession,
                      operation: @escaping @MainActor (any AssistanceProvider) async throws -> Void) {
         guard !busy, settings.canProcess else {
             if !settings.canProcess { message = "Choose offline demo, or provide an API key and allow OpenAI processing in Settings." }
@@ -232,18 +325,19 @@ final class AssistanceCoordinator: ObservableObject {
         if let providerFactory { provider = providerFactory(settings) }
         else if settings.offline { provider = FixtureProvider(scenario: settings.scenario, ledger: settings.ledger) }
         else { provider = OpenAIAssistance(apiKey: settings.apiKey, ledger: settings.ledger) }
-        let id = UUID(); generation = id; activity = label; message = nil
-        suggestion = makeSuggestion(answer: suggestion?.answer ?? "", state: label.contains("Researching") ? .researching : .recognising,
+        let id = UUID(); generation = id; workPhase = phase; activity = phase.label; message = nil
+        suggestion = makeSuggestion(answer: suggestion?.answer ?? "", state: phase == .researching ? .researching : .recognising,
                                     evidence: retainedEvidence, fixture: settings.offline)
         task = Task { @MainActor in
             do { try await operation(provider) }
             catch {
                 guard self.generation == id, !Task.isCancelled else { return }
+                self.streamingText = ""
                 self.message = (error as? LocalizedError)?.errorDescription ?? "The request failed. Check your connection and retry."
                 self.suggestion = self.makeSuggestion(answer: "", state: .failed, evidence: [], fixture: settings.offline)
             }
             guard self.generation == id else { return }
-            self.activity = nil; self.task = nil
+            self.activity = nil; self.workPhase = nil; self.task = nil
             await self.refreshUsage(settings)
             if let queued = self.queued, settings.mode == .automatic {
                 self.queued = nil

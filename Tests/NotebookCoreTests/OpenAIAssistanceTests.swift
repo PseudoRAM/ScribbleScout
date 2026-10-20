@@ -97,6 +97,79 @@ struct OpenAIAssistanceTests {
         }
     }
 
+    @Test func recognitionSeparatesSelectedInkFromWholeCanvasContext() throws {
+        let body = OpenAIAssistance.recognitionBody(Data([1]), context: Data([2]))
+        let input = try #require(body["input"] as? [[String: Any]])
+        let content = try #require(input.first?["content"] as? [[String: Any]])
+        #expect(content.count == 3)
+        #expect(content[1]["image_url"] as? String == "data:image/png;base64,AQ==")
+        #expect(content[2]["image_url"] as? String == "data:image/png;base64,Ag==")
+        #expect((content[0]["text"] as? String)?.contains("do not transcribe unselected text") == true)
+        #expect(body["tools"] == nil)
+    }
+
+    @Test func streamingDecoderHandlesUnicodeMultilineDataAndRejectsFailedResponses() throws {
+        var decoder = ResponseTextStream()
+        #expect(try decoder.consume(": keepalive") == nil)
+        #expect(try decoder.consume("event: response.output_text.delta") == nil)
+        _ = try decoder.consume("data: {\"type\":\"response.output_text.delta\",")
+        _ = try decoder.consume("data: \"delta\":\"An index 📝\"}")
+        guard case .text(let text) = try decoder.consume("") else { Issue.record("Expected partial text"); return }
+        #expect(text == "An index 📝")
+        let completed = try data(["type": "response.completed", "response": response("An index 📝 speeds reads.")])
+        _ = try decoder.consume("data: " + String(decoding: completed, as: UTF8.self))
+        guard case .completed(let final) = try decoder.consume("") else { Issue.record("Expected completion"); return }
+        #expect(try OpenAIAssistance.parseAnswer(final, research: false).text == "An index 📝 speeds reads.")
+        _ = try decoder.consume("data: {\"type\":\"response.incomplete\"}")
+        #expect(throws: AssistanceError.invalidResponse) { try decoder.consume("") }
+    }
+
+    @Test func streamingTransportPublishesTextAndAccountsForCompletionAndTruncation() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [StubOpenAI.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let ledger = UsageLedger()
+        let provider = OpenAIAssistance(apiKey: "synthetic-key", session: session, ledger: ledger)
+        var final = response("An index speeds reads.")
+        final["usage"] = ["input_tokens": 12, "output_tokens": 5]
+        let completion = String(decoding: try data(["type": "response.completed", "response": final]), as: UTF8.self)
+        let prefix = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"An index\"}\n\n"
+        StubOpenAI.handler = { request in
+            var requestData = request.httpBody ?? Data()
+            if requestData.isEmpty, let stream = request.httpBodyStream {
+                stream.open()
+                defer { stream.close() }
+                var buffer = [UInt8](repeating: 0, count: 4096)
+                while stream.hasBytesAvailable {
+                    let count = stream.read(&buffer, maxLength: buffer.count)
+                    if count <= 0 { break }
+                    requestData.append(contentsOf: buffer.prefix(count))
+                }
+            }
+            let body = try JSONSerialization.jsonObject(with: requestData) as? [String: Any]
+            #expect(body?["stream"] as? Bool == true)
+            #expect(body?["tools"] == nil)
+            return (200, Data((prefix + "data: " + completion + "\n\n").utf8))
+        }
+        actor Updates {
+            var values: [String] = []
+            func append(_ value: String) { values.append(value) }
+        }
+        let updates = Updates()
+        let answer = try await provider.answer("Explain an index", research: false, image: nil) { await updates.append($0) }
+        #expect(answer.text == "An index speeds reads.")
+        #expect(await updates.values.first == "An index")
+        #expect(await updates.values.last == answer.text)
+        #expect(await ledger.entries.first?.succeeded == true)
+        #expect(await ledger.summary.inputTokens == 12)
+        StubOpenAI.handler = { _ in (200, Data(prefix.utf8)) }
+        await #expect(throws: AssistanceError.invalidResponse) {
+            try await provider.answer("Explain an index", research: false, image: nil) { _ in }
+        }
+        #expect(await ledger.entries.last?.succeeded == false)
+    }
+
     @Test func ledgerRecordsReportedUsageFallbackAndFailureWithoutEstimatingTokens() async throws {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [StubOpenAI.self]

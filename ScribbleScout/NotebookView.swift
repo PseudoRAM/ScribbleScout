@@ -26,7 +26,7 @@ struct NotebookView: View {
         GeometryReader { geometry in
             Group {
                 if let session = store.current {
-                    NoteEditor(session: session, scout: scout) { showingNotebook.toggle() }
+                    NoteEditor(session: session, scout: scout, store: store) { showingNotebook.toggle() }
                         .id(session.id).accessibilityHidden(showingNotebook).allowsHitTesting(!showingNotebook)
                 } else {
                     ContentUnavailableView {
@@ -338,7 +338,7 @@ private struct LassoAssistanceOverlay: View {
                 }
                 .stroke(NotebookTheme.burgundy, style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
                 .allowsHitTesting(false)
-                Button("Ask AI", systemImage: "sparkles") { ask(selection) }
+                Button("Ask Scout", systemImage: "sparkles") { ask(selection) }
                     .font(.body.weight(.semibold)).buttonStyle(.borderedProminent)
                     .frame(minHeight: 44)
                     .offset(x: max(12, min(x, geometry.size.width - 150)),
@@ -369,6 +369,7 @@ private struct SharedPage: Identifiable {
 private struct NoteEditor: View {
     @ObservedObject var session: NoteSession
     @ObservedObject var scout: ScoutSession
+    @ObservedObject var store: NotebookStore
     var openNotebook: () -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @StateObject private var controls = CanvasControls()
@@ -413,13 +414,13 @@ private struct NoteEditor: View {
                 .overlay {
                     if assistance.region?.id != controls.selection?.region.id || assistance.region == nil {
                         LassoAssistanceOverlay(controls: controls, viewport: controls.viewport) { selection in
-                            assistance.prepare(selection, region: selection.region)
+                            assistance.ask(selection, using: scout)
                             showingScout = true
                         }
                     }
                 }
                 .overlay {
-                    AssistanceCanvasOverlay(session: session, coordinator: assistance, viewport: controls.viewport,
+                    AssistanceCanvasOverlay(session: session, credentials: scout, coordinator: assistance, viewport: controls.viewport,
                                             controls: controls) { showingScout = true }
                 }
                 .clipped()
@@ -438,7 +439,7 @@ private struct NoteEditor: View {
             .background(Color(uiColor: NotebookTheme.paper))
         }
         .sheet(isPresented: $showingScout) {
-            ScoutSheet(credentials: scout, coordinator: assistance) { suggestion, placement in
+            ScoutSheet(credentials: scout, coordinator: assistance, sourceSession: store.sourceSession) { suggestion, placement in
                 let viewport = controls.viewport
                 let zoom = max(0.15, viewport.value.zoom)
                 let source = suggestion.request.region.bounds.cgRect
@@ -463,14 +464,21 @@ private struct NoteEditor: View {
                 controls.refresh()
             }
         }
-        .onAppear { assistance.resolveSource = { region in CanvasSource.resolve(region, note: session.note, drawing: session.drawing) } }
+        .onAppear { assistance.recallSearch = { query in try await store.recall(query) }; assistance.resolveSource = { region in CanvasSource.resolve(region, note: session.note, drawing: session.drawing) } }
         .onChange(of: session.note.drawingRevision) { _, _ in
             if assistance.region != nil { assistance.validate() }
             assistance.schedulePause(using: scout) { controls.captureChangedRegion() }
         }
         .onChange(of: session.note.text) { _, _ in if assistance.region != nil { assistance.validate() } }
         .onChange(of: session.note.attachment) { _, _ in if assistance.region != nil { assistance.validate() } }
-        .onChange(of: scout.mode) { _, mode in if mode != .automatic { assistance.stopAutomatic() } }
+        .onChange(of: scout.mode) { _, mode in
+            if mode != .automatic { assistance.stopAutomatic() }
+            else { assistance.schedulePause(using: scout) { controls.captureChangedRegion() } }
+        }
+        .onChange(of: scout.canProcess) { _, allowed in
+            if allowed { assistance.schedulePause(using: scout) { controls.captureChangedRegion() } }
+            else { assistance.cancel() }
+        }
 
         .sheet(isPresented: $editingText) { textSheet }
         .sheet(item: $contextAction) { action in contextSheet(action) }
@@ -552,6 +560,11 @@ private struct NoteEditor: View {
             Button("Return to canvas start", systemImage: "house", action: controls.resetZoom)
             Button("Typed notes", systemImage: "textformat") { editingText = true }
             Button("Ask Scout", systemImage: "sparkles", action: openScout)
+            Button("Recall dated meetings", systemImage: "clock") {
+                openScout()
+                assistance.transcript = NoteRecord.recallQuestion
+                assistance.recall()
+            }
             Toggle("Show fictional concept cards", isOn: $showingConceptCards)
             if session.note.attachment != nil {
                 Button("Remove photo", systemImage: "photo.badge.minus") { session.edit { $0.attachment = nil } }

@@ -18,6 +18,18 @@ struct CheckOpenAI {
                 }
             }
             let provider = OpenAIAssistance(apiKey: key)
+            if CommandLine.arguments.contains("--stream") {
+                let measurement = StreamMeasurement()
+                let answer = try await provider.answer("Explain what a database index is in simple terms.", research: false, image: nil) { _ in
+                    await measurement.received()
+                }
+                let (updates, first, total) = await measurement.summary
+                guard !answer.text.isEmpty, updates >= 2 else { throw AssistanceError.invalidResponse }
+                let usage = await provider.ledger.summary
+                print("Synthetic live streaming passed: \(updates) updates; first text \(String(format: "%.2f", first))s; completed \(String(format: "%.2f", total))s")
+                print("Reported input/output tokens: \(usage.inputTokens)/\(usage.outputTokens). This is not a physical handwriting measurement.")
+                return
+            }
             if CommandLine.arguments.contains("--image") || CommandLine.arguments.contains("--recognition") {
                 let picture = NSImage(size: NSSize(width: 420, height: 140))
                 picture.lockFocus()
@@ -89,4 +101,15 @@ struct CheckOpenAI {
             exit(1)
         }
     }
+}
+
+private actor StreamMeasurement {
+    private let start = Date()
+    private var updates = 0
+    private var first: Double?
+    func received() {
+        updates += 1
+        if first == nil { first = Date().timeIntervalSince(start) }
+    }
+    var summary: (Int, Double, Double) { (updates, first ?? 0, Date().timeIntervalSince(start)) }
 }

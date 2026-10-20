@@ -8,6 +8,23 @@ import SwiftUI
 struct NotebookTests {
     @MainActor
     @Test
+    func datedMeetingRenameRetainsBoundsAndTextEditRemovesStaleAnchors() throws {
+        try withRepository { repository in
+            let meeting = NoteRecord.fictionalMeetings[0]
+            let session = NoteSession(note: meeting, drawing: PKDrawing(), repository: repository)
+            session.edit { $0.title = "Renamed fictional meeting" }
+            #expect(session.note.meetingEvidence?.first?.title == "Renamed fictional meeting")
+            #expect(session.note.meetingEvidence?.first?.bounds == meeting.meetingEvidence?.first?.bounds)
+            #expect(session.flush())
+            let restored = try repository.load(meeting.id)
+            #expect(restored.note.meetingEvidence == session.note.meetingEvidence)
+            session.edit { $0.text = "Revised meeting content" }
+            #expect(session.note.meetingEvidence == nil)
+        }
+    }
+
+    @MainActor
+    @Test
     func testPencilCanvasIsActiveOnOpeningAndAfterClearing() throws {
         try withRepository { repository in
             let session = NoteSession(note: NoteRecord(), drawing: PKDrawing(), repository: repository)
@@ -529,10 +546,11 @@ struct NotebookTests {
             let selected = try #require(controls.selection)
             #expect(selected.bounds == CGRect(x: 60, y: 60, width: 200, height: 200))
             #expect(selected.image.size == CGSize(width: 400, height: 400))
-            #expect(selected.contextBounds == CGRect(x: -240, y: -240, width: 800, height: 800))
-            #expect(selected.contextImage.size == CGSize(width: 1600, height: 1600))
+            #expect(selected.contextBounds.contains(CGRect(origin: .zero, size: NotebookPage.size)))
+            #expect(max(selected.contextImage.size.width, selected.contextImage.size.height) <= 1600)
             let contextCG = try #require(selected.contextImage.cgImage)
-            let contextPixel = try #require(contextCG.cropping(to: CGRect(x: 960, y: 960, width: 1, height: 1)))
+            let contextScale = selected.contextImage.size.width / selected.contextBounds.width
+            let contextPixel = try #require(contextCG.cropping(to: CGRect(x: (240 - selected.contextBounds.minX) * contextScale, y: (240 - selected.contextBounds.minY) * contextScale, width: 1, height: 1)))
             let data = try #require(contextPixel.dataProvider?.data)
             let bytes = try #require(CFDataGetBytePtr(data))
             #expect(min(bytes[0], bytes[1], bytes[2]) < 120, "The nearby red photo must remain available as context outside the lasso")
