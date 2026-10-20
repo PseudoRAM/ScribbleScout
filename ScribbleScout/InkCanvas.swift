@@ -1,5 +1,118 @@
+import CryptoKit
 import PencilKit
 import SwiftUI
+
+extension CanvasBounds {
+    init(_ rect: CGRect) { self.init(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height) }
+    var cgRect: CGRect { CGRect(x: x, y: y, width: width, height: height) }
+}
+
+/// App-owned source identity. Stroke order and translation are deliberately excluded.
+/// Ambiguous duplicate strokes fail closed rather than attaching evidence to different ink.
+enum CanvasSource {
+    private struct Stroke: Codable {
+        var hash: String
+        var x: Double
+        var y: Double
+    }
+    private struct Snapshot: Codable {
+        var strokes: [Stroke]
+        var paper: String
+        var originalBounds: CanvasBounds
+    }
+    private static func digest(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+    private static func identity(_ stroke: PKStroke) -> Stroke {
+        // Normalize only translation; rotation, resizing, masking and erased points invalidate the source.
+        let origin = stroke.renderBounds.origin
+        var values: [Double] = [Double(stroke.randomSeed)]
+        for point in stroke.path {
+            let location = point.location.applying(stroke.transform)
+            values += [location.x - origin.x, location.y - origin.y, point.timeOffset,
+                       point.size.width, point.size.height, point.opacity, point.force, point.azimuth, point.altitude]
+        }
+        // Preserve rotation/scaling and erasure information while allowing a pure translation.
+        values += [stroke.transform.a, stroke.transform.b, stroke.transform.c, stroke.transform.d]
+        if let mask = stroke.mask {
+            mask.cgPath.applyWithBlock { pointer in
+                let element = pointer.pointee
+                values.append(Double(element.type.rawValue))
+                let count: Int
+                switch element.type {
+                case .moveToPoint, .addLineToPoint: count = 1
+                case .addQuadCurveToPoint: count = 2
+                case .addCurveToPoint: count = 3
+                case .closeSubpath: count = 0
+                @unknown default: count = 0
+                }
+                for index in 0..<count {
+                    values += [element.points[index].x, element.points[index].y]
+                }
+            }
+        }
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        stroke.ink.color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        values += [red, green, blue, alpha]
+        let rounded = values.map { ($0 * 1_000_000).rounded() / 1_000_000 }
+        var data = (try? JSONEncoder().encode(rounded)) ?? Data()
+        data.append(Data(stroke.ink.inkType.rawValue.utf8))
+        return Stroke(hash: digest(data), x: origin.x, y: origin.y)
+    }
+    private static func paper(_ note: NoteRecord, in rect: CGRect) -> String {
+        var data = Data()
+        let page = CGRect(origin: .zero, size: NotebookPage.size(for: note))
+        if note.template != nil && page.intersects(rect) { data.append(Data("checkout-v1".utf8)) }
+        let attachmentRect = CGRect(x: 60, y: 60, width: 300, height: note.attachment.flatMap(UIImage.init(data:)).map { 300 * $0.size.height / $0.size.width } ?? 0)
+        if rect.intersects(attachmentRect), let attachment = note.attachment { data.append(attachment) }
+        let textRect = CGRect(x: 60, y: note.attachment == nil ? 60 : 400, width: page.width - 120, height: page.height - 140)
+        if note.template == nil && rect.intersects(textRect) { data.append(Data(note.text.utf8)) }
+        return digest(data)
+    }
+    static func region(note: NoteRecord, drawing: PKDrawing, bounds: CGRect) -> NoteRegion {
+        let snapshot = Snapshot(strokes: drawing.strokes.filter { $0.renderBounds.intersects(bounds) }.map(identity),
+                                paper: paper(note, in: bounds), originalBounds: CanvasBounds(bounds))
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let encoded = (try? encoder.encode(snapshot)) ?? Data()
+        return NoteRegion(canvasID: note.id, revision: note.drawingRevision, bounds: CanvasBounds(bounds),
+                          sourceHash: encoded.base64EncodedString())
+    }
+    static func typedRegion(note: NoteRecord) -> NoteRegion {
+        NoteRegion(canvasID: note.id, revision: note.drawingRevision,
+                   bounds: CanvasBounds(x: 60, y: note.attachment == nil ? 60 : 400, width: 880, height: 240),
+                   recognisedText: note.text, sourceHash: "typed:" + digest(Data(note.text.utf8)))
+    }
+    static func resolve(_ region: NoteRegion, note: NoteRecord, drawing: PKDrawing) -> NoteRegion? {
+        if region.sourceHash.hasPrefix("typed:") {
+            return region.canvasID == note.id && region.sourceHash == typedRegion(note: note).sourceHash ? region : nil
+        }
+        guard note.id == region.canvasID, let data = Data(base64Encoded: region.sourceHash),
+              let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data) else { return nil }
+        let current = drawing.strokes.map(identity)
+        var translation: CGPoint?
+        for source in snapshot.strokes {
+            let candidates = current.filter { $0.hash == source.hash }
+            // Prefer the original location when identical marks occur elsewhere.
+            let exact = candidates.filter { abs($0.x - source.x) < 0.01 && abs($0.y - source.y) < 0.01 }
+            guard let match = exact.count == 1 ? exact.first : (candidates.count == 1 ? candidates.first : nil) else { return nil }
+            let delta = CGPoint(x: match.x - source.x, y: match.y - source.y)
+            if let translation, hypot(delta.x - translation.x, delta.y - translation.y) > 0.1 { return nil }
+            translation = delta
+        }
+        let delta = translation ?? .zero
+        let bounds = snapshot.originalBounds.cgRect.offsetBy(dx: delta.x, dy: delta.y)
+        // Paper cannot move with ink; only allow translation when no printed content is selected.
+        guard snapshot.paper == paper(note, in: bounds),
+              delta == .zero || snapshot.paper == digest(Data()) else { return nil }
+        let hashes = drawing.strokes.filter { $0.renderBounds.intersects(bounds) }.map { identity($0).hash }.sorted()
+        guard hashes == snapshot.strokes.map(\.hash).sorted() else { return nil }
+        var resolved = region
+        resolved.bounds = CanvasBounds(bounds)
+        resolved.revision = note.drawingRevision
+        return resolved
+    }
+}
 
 struct CanvasMapGeometry {
     let bounds: CGRect
@@ -43,11 +156,14 @@ struct CanvasSelection: Identifiable {
     let contextBounds: CGRect
     let bounds: CGRect
     let outline: [CGPoint]
+    let region: NoteRegion
 }
 
 @MainActor
 final class CanvasControls: ObservableObject {
     weak var canvas: PKCanvasView?
+    var undoManager: UndoManager? { canvas?.undoManager }
+    private var recentChangedBounds: CGRect?
     @Published var canUndo = false
     @Published var canRedo = false
     let viewport = CanvasViewport()
@@ -101,7 +217,43 @@ final class CanvasControls: ObservableObject {
         let contextImage = render(contextBounds, mask: false)
         guard let png = image.pngData(), let contextPNG = contextImage.pngData() else { return }
         selection = CanvasSelection(image: image, png: png, contextImage: contextImage, contextPNG: contextPNG,
-                                    contextBounds: contextBounds, bounds: rect, outline: outline)
+                                    contextBounds: contextBounds, bounds: rect, outline: outline,
+                                    region: CanvasSource.region(note: canvas.paper.note, drawing: canvas.drawing, bounds: rect))
+    }
+
+    func resolveSource(_ region: NoteRegion) -> NoteRegion? {
+        guard let canvas = canvas as? NotebookCanvasView else { return nil }
+        return CanvasSource.resolve(region, note: canvas.paper.note, drawing: canvas.drawing)
+    }
+    func isCurrent(_ region: NoteRegion) -> Bool { resolveSource(region) != nil }
+    func typedRegion() -> NoteRegion? {
+        guard let canvas = canvas as? NotebookCanvasView else { return nil }
+        return CanvasSource.typedRegion(note: canvas.paper.note)
+    }
+
+    /// Snapshot only the bounded recent changed area, after the caller's pause debounce.
+    func captureChangedRegion() -> CanvasSelection? {
+        guard let rect = recentChangedBounds, !rect.isNull else { return nil }
+        recentChangedBounds = nil
+        let bounded = CGRect(x: rect.midX - min(rect.width, 1000) / 2,
+                             y: rect.midY - min(rect.height, 1000) / 2,
+                             width: min(rect.width, 1000), height: min(rect.height, 1000)).insetBy(dx: -16, dy: -16)
+        captureSelection(outline: [CGPoint(x: bounded.minX, y: bounded.minY), CGPoint(x: bounded.maxX, y: bounded.minY),
+                                   CGPoint(x: bounded.maxX, y: bounded.maxY), CGPoint(x: bounded.minX, y: bounded.maxY)])
+        return selection
+    }
+    func captureRecentChange() -> CanvasSelection? { captureChangedRegion() }
+
+    fileprivate func recordChanges(from previous: PKDrawing, to current: PKDrawing) {
+        // No rendering here. Union changed stroke bounds, then crop once after the writing pause.
+        let old = previous.strokes
+        let new = current.strokes
+        let oldData = Set(old.map { PKDrawing(strokes: [$0]).dataRepresentation() })
+        let newData = Set(new.map { PKDrawing(strokes: [$0]).dataRepresentation() })
+        let changed = new.filter { !oldData.contains(PKDrawing(strokes: [$0]).dataRepresentation()) } +
+            old.filter { !newData.contains(PKDrawing(strokes: [$0]).dataRepresentation()) }
+        let rect = changed.reduce(CGRect.null) { $0.union($1.renderBounds) }
+        if !rect.isNull { recentChangedBounds = (recentChangedBounds ?? .null).union(rect) }
     }
 
     func refresh() {
@@ -171,6 +323,19 @@ final class CanvasControls: ObservableObject {
             PaperPattern.draw(canvas.paper.note.paper, in: context.cgContext, rect: rect, scale: scale)
             canvas.paper.draw(canvas.paper.bounds)
             canvas.drawing.image(from: rect, scale: scale).draw(in: rect)
+            for block in canvas.paper.note.blocks ?? [] {
+                let bounds = block.bounds.cgRect
+                UIColor.white.setFill()
+                UIBezierPath(roundedRect: bounds, cornerRadius: 12).fill()
+                let provenance = block.isFixture ? "AI · Demo fixture" : "AI · Sources attached"
+                let sources = block.evidence.map { evidence in
+                    evidence.title + (evidence.url.map { " — " + $0.absoluteString } ?? "")
+                }.joined(separator: "\n")
+                let text = [provenance, block.body, block.caveat, sources].filter { !$0.isEmpty }.joined(separator: "\n\n")
+                (text as NSString).draw(in: bounds.insetBy(dx: 14, dy: 14), withAttributes: [
+                    .font: UIFont.systemFont(ofSize: 16), .foregroundColor: UIColor(NotebookTheme.ink)
+                ])
+            }
             annotations?.draw(in: canvas.paper.bounds)
         }
     }
@@ -270,7 +435,13 @@ private final class NotebookCanvasView: PKCanvasView {
                width: bounds.width / zoomScale, height: bounds.height / zoomScale)
     }
     var occupiedRect: CGRect {
-        CGRect(origin: .zero, size: pageSize).union(drawing.bounds.isNull ? .null : drawing.bounds.insetBy(dx: -32, dy: -32))
+        let content = CGRect(origin: .zero, size: pageSize).union(drawing.bounds.isNull ? .null : drawing.bounds.insetBy(dx: -32, dy: -32))
+        return (paper.note.blocks ?? []).reduce(content) { $0.union($1.bounds.cgRect.insetBy(dx: -32, dy: -32)) }
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil { becomeFirstResponder() }
     }
 
     func expand(toInclude rect: CGRect) {
@@ -483,7 +654,12 @@ struct InkCanvas: UIViewRepresentable {
         init(session: NoteSession, controls: CanvasControls) { self.session = session; self.controls = controls }
 
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
+            // Keep an emptied canvas ready for the next Pencil stroke, including after undo.
+            if canvasView.window != nil && canvasView.drawing.strokes.isEmpty {
+                canvasView.becomeFirstResponder()
+            }
             controls.selection = nil
+            controls.recordChanges(from: session.drawing, to: canvasView.drawing)
             session.setDrawing(canvasView.drawing)
             scheduleOverview(canvasView)
             // Undo registration finishes after PencilKit's delegate callback.

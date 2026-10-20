@@ -1,0 +1,64 @@
+# Scribble Scout demo
+
+The demonstration is a native iPad notebook, not a meeting recorder. Original ink stays local. Live recognition sends only the previewed selection to OpenAI; nearby canvas context is excluded. Public research uses a separate question that the user reviews before sending.
+
+## Prepare
+
+1. Build the `ScribbleScout` scheme with Xcode 26.2 or later and run on an iPad. The deployment target is iPadOS 18.
+2. Create a fresh note. Use fictional technical content, not workplace notes or customer names.
+3. Choose live assistance with your own runtime key, or the explicitly labelled offline example provider. Offline examples demonstrate the interaction; they are not live web findings or handwriting accuracy measurements.
+4. Keep the original source page available. The example content on the old checkout reference page is a design reference, not a verified Stripe capability claim.
+5. Use explicit assistance for the essential demonstration. Enable pause assistance only after explaining its opt-in behavior and the content it sends.
+
+## Two-minute story
+
+| Time | Action | What it proves |
+| --- | --- | --- |
+| 0:00–0:20 | Write a specific technical question with Apple Pencil, then add another note. | Ink remains the primary interaction. |
+| 0:20–0:45 | Lasso the question, open Scout, inspect the crop, recognise it and correct the text if needed. | The user can catch extraction mistakes before research. |
+| 0:45–1:10 | Review a minimal public question with names and private context removed. Start research, close the inspector and continue writing. | Research stays asynchronous; public query review is separate from private context. |
+| 1:10–1:30 | Tap the ready pin. Read the finding and limitation; open a real supporting source. | Returned citations are inspectable. A URL alone does not prove a claim. |
+| 1:30–1:50 | Insert a labelled AI block in free space; edit it, undo acceptance, then redo. | Generated text is separate from ink and retains its sources. |
+| 1:50–2:00 | Reopen the note and show the block. Briefly demonstrate an ambiguous question or stale result. | Persistence and a visible trust boundary, not just an API response. |
+
+Do not claim the flow is live when using offline examples. Say which provider ran, what was corrected and what remains uncertain. Recall is optional; omit it if it distracts from the essential loop.
+
+## Failure rehearsal
+
+Run these before recording the live demonstration. Keep the result bundle and record the device, app commit, provider/model and observed timings.
+
+- Clear handwriting, technical acronym, negation, incomplete phrase, erasure and a small mixed diagram. Record transcription errors rather than silently fixing them in the reported result.
+- Edit or delete the source while research is running. The obsolete result must not attach to new writing. Move an intact source and check its pin resolves to the new position.
+- Request the same source twice, dismiss it and enable automatic assistance. Check duplicates and muted topics remain suppressed.
+- Cancel a pending request, then explicitly retry. Cancellation ends local waiting; remote processing and billing may continue.
+- Try an invalid key, offline network and rate-limited response. Drawing, local saves and existing notes must remain usable.
+- Check an incomplete or citation-free research response is withheld. Manually compare every displayed research claim with its cited source.
+- Insert, edit, undo, redo, background and relaunch. Confirm ink, text, block placement and evidence survive.
+
+## Recording and fallback
+
+Record a successful run on the actual iPad. A simulator recording is useful implementation evidence but does not validate Apple Pencil feel or real handwriting. If the network fails, switch explicitly to offline examples and state that live research did not run. Keep a successful earlier live recording as a separate fallback.
+
+For simulator capture after installation:
+
+```sh
+xcrun simctl io booted recordVideo output/demo-simulator.mov
+# Perform the demo; stop recording with Control-C.
+```
+
+Record organiser slot/submission requirements separately. Neither a simulator video nor an installed development build establishes an accepted submission, TestFlight distribution or App Store release.
+
+## Scope
+
+BIL-5–17 cover the essential demo, with BIL-18 providing the bounded pause enhancement and BIL-19 selected explanations/follow-ups. BIL-20–22 recall remains stretch scope. Hosted services, accounts, study telemetry, sync and request-circle gestures are not needed for this demonstration.
+
+## Verification · 20 October 2026
+
+- 26 Foundation-only tests pass in Debug and Release, including transcription parsing, safe source modes, structured synthesis/source IDs, usage accounting, cancellation, rate limits and timeout behavior.
+- 32 iOS persistence/coordinator tests pass, including block recovery and undo/redo, source moves and repeated validation, stale queued captures, explicit priority, cancellation, dismissal suppression, follow-up references and offline stale examples.
+- Simulator UI checks pass for continuous drawing/undo/pan, notebook navigation/large text, and fictional research → insert → one-step undo/redo → edit → reopen. These are separate from a live handwriting demonstration.
+- A signed build installs and launches on the paired iPad mini (6th generation). Real Apple Pencil feel and the complete live handwriting flow have not been checked by a human in this implementation session.
+- Live synthetic checks passed for routing, quick answers, cited research plus structured synthesis, and printed-image extraction. Detailed measurements and their limits are in the README.
+- The local credential-launcher and secret-guard self-checks pass. No key is bundled or included in the recording fixtures.
+
+Outstanding rehearsal: evaluate actual handwriting/acronyms/negation/diagrams, manually check source support for the chosen demo question, confirm organiser requirements, and record the complete live run on the actual iPad. Do not replace these checks with the simulator or printed-image results.

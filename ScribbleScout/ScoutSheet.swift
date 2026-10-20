@@ -1,233 +1,235 @@
 import SwiftUI
 
-/// Credentials live only in memory for this notebook session and are never added to a note.
+/// Credentials and consent last only for this app session; neither is added to a note.
 @MainActor
 final class ScoutSession: ObservableObject {
+    enum Mode: String, CaseIterable, Identifiable {
+        case off = "Off", explicit = "Explicit only", automatic = "Automatic (opt in)"
+        var id: Self { self }
+    }
     @Published var apiKey: String
     @Published private(set) var hasDevelopmentKey: Bool
-
+    @Published var consent = false
+    @Published var offline = true
+    @Published var mode: Mode = .explicit
+    @Published var scenario: FixtureScenario = .grounded
+    @Published var jobs = 0
+    let ledger = UsageLedger()
+    static let jobLimit = 60
+    var canProcess: Bool { mode != .off && (offline || (consent && !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)) }
     init() {
         let key = DevelopmentCredential.apiKey()
-        apiKey = key
-        hasDevelopmentKey = !key.isEmpty
+        apiKey = key; hasDevelopmentKey = !key.isEmpty
     }
+    func forgetKey() { apiKey = ""; hasDevelopmentKey = false; consent = false }
+}
 
-    func forgetKey() {
-        apiKey = ""
-        hasDevelopmentKey = false
-    }
-    @Published var jobs = 0
-    static let jobLimit = 20
+enum BlockPlacement: String, CaseIterable, Identifiable {
+    case belowWriting = "Below writing", besideSource = "Beside selection", visibleCanvas = "Visible canvas"
+    var id: Self { self }
 }
 
 struct ScoutSheet: View {
     @ObservedObject var credentials: ScoutSession
-    var selection: CanvasSelection? = nil
+    @ObservedObject var coordinator: AssistanceCoordinator
+    var insert: (Suggestion, BlockPlacement) -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var question = ""
-    @State private var publicQuestion = ""
-    @State private var consent = false
-    @State private var includeContext = true
-    @State private var decision: RoutingDecision?
-    @State private var answer: AssistanceAnswer?
-    @State private var message: String?
-    @State private var activity: String?
-    @State private var task: Task<Void, Never>?
-    @State private var generation = UUID()
-
-    private var busy: Bool { activity != nil }
-    private var canRequest: Bool {
-        consent && !credentials.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && credentials.jobs < ScoutSession.jobLimit && !busy
-    }
+    @State private var settings = false
+    @State private var placement: BlockPlacement = .belowWriting
 
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    if credentials.hasDevelopmentKey {
-                        Label("API key available for this session", systemImage: "key")
-                    } else {
-                        SecureField("Your OpenAI API key", text: $credentials.apiKey)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .disabled(busy).accessibilityLabel("Your OpenAI API key")
+                if credentials.offline {
+                    Section { Label("Fictional offline demo", systemImage: "airplane").font(.headline)
+                        Text("Responses and sources are scripted examples. No network request or API key is used.").font(.callout)
                     }
-                    if !credentials.apiKey.isEmpty {
-                        Button("Forget key", role: .destructive) { cancel(); credentials.forgetKey(); consent = false }
-                    }
-                    Toggle("Allow OpenAI processing", isOn: $consent).disabled(busy)
-                } header: { Text("Personal prototype") } footer: {
-                    Text("Your question and the canvas image previewed here, if any, are sent to OpenAI. When nearby context is on, that surrounding area is included too. The rest of your notebook stays on this iPad. Your key stays in memory until you forget it or close the app. API usage is billed to your OpenAI project. Responses use store=false; this does not mean zero retention.")
                 }
-                if let selection {
-                    Section("Selected canvas area") {
-                        Image(uiImage: selection.image).resizable().scaledToFit().frame(maxHeight: 240)
-                            .accessibilityLabel("Preview of the lassoed content to send to OpenAI")
-                        Toggle("Use nearby canvas context", isOn: $includeContext).disabled(busy)
-                            .onChange(of: includeContext) { _, _ in clearResult() }
-                        if includeContext {
-                            Image(uiImage: selection.contextImage).resizable().scaledToFit().frame(maxHeight: 260)
-                                .accessibilityLabel("Nearby canvas context with the selected area outlined in burgundy")
-                            Text("The outlined area is the focus. Nearby content outside it helps the AI understand your question. This is the image that will be sent.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        } else {
-                            Text("Only the lassoed content above will be sent.").font(.caption).foregroundStyle(.secondary)
+                if let selection = coordinator.selection {
+                    Section("Source selection") {
+                        Image(uiImage: selection.image).resizable().scaledToFit().frame(maxHeight: 220)
+                            .accessibilityLabel("Selected handwriting to recognise")
+                        Text("Only this selected area is sent for recognition. Nearby notebook content is excluded.").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                if coordinator.stage == .compose {
+                    Section {
+                        Button("Recognise handwriting", systemImage: "text.viewfinder") { coordinator.recognise(using: credentials) }
+                            .disabled(coordinator.busy || !credentials.canProcess).frame(minHeight: 44)
+                            .accessibilityIdentifier("recogniseSelection")
+                    } footer: { Text("You can inspect and correct the transcription before asking Scout to use it.") }
+                } else {
+                    Section {
+                        TextField("Recognised text or question", text: Binding(get: { coordinator.transcript }, set: {
+                            guard coordinator.transcript != $0 else { return }
+                            coordinator.transcript = $0
+                            coordinator.transcriptEdited()
+                        }), axis: .vertical)
+                            .lineLimit(3...10).disabled(coordinator.busy)
+                            .accessibilityIdentifier("scoutQuestion")
+                        if let uncertainties = coordinator.region?.uncertainty, !uncertainties.isEmpty {
+                            Label(uncertainties.joined(separator: "\n"), systemImage: "exclamationmark.triangle")
+                                .font(.callout).foregroundStyle(.secondary)
                         }
+                        Button("Use corrected text", systemImage: "arrow.right") { coordinator.route(using: credentials) }
+                            .disabled(coordinator.busy || !credentials.canProcess || coordinator.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .frame(minHeight: 44).accessibilityIdentifier("askScout")
+                    } header: { Text("Inspect and correct") } footer: {
+                        Text("Check names, acronyms, numbers and negation. A recognition error can change the answer.")
                     }
                 }
-                Section {
-                    TextField("Question or short passage", text: $question, axis: .vertical)
-                        .lineLimit(3...8).disabled(busy)
-                        .accessibilityIdentifier("scoutQuestion")
-                        .onChange(of: question) { _, _ in clearResult() }
-                    Button("Ask Scout", systemImage: "sparkles") { classify() }
-                        .disabled(!canRequest || question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        .frame(minHeight: 44).accessibilityIdentifier("askScout")
-                } header: { Text("What are you thinking about?") } footer: {
-                    Text("Type a question or use the lasso to select handwriting, text, or a sketch. Scout checks whether to answer, research, search your notes, or ask for more context.")
-                }
-                if let activity {
+                if let activity = coordinator.activity {
                     Section {
-                        ProgressView(activity).accessibilityLabel(activity)
-                        Button("Cancel request", action: cancel).frame(minHeight: 44)
+                        ProgressView(activity)
+                        Text("You can close this inspector and keep writing. The source pin will show when Scout is ready.").font(.callout)
+                        Button("Cancel request", role: .destructive) { coordinator.cancel() }.frame(minHeight: 44)
                     }
                 }
-                if let decision {
-                    Section {
-                        Label(decision.route.title, systemImage: symbol(decision.route)).font(.headline)
+                if let decision = coordinator.decision {
+                    Section("Next step · \(decision.route.title)") {
                         if decision.route == .webResearch {
-                            Text("Enter a public search question. Remove names, private decisions, and confidential details. Only this question will be sent for web research.")
-                            TextField("Public research question", text: $publicQuestion, axis: .vertical)
-                                .lineLimit(2...6).disabled(busy)
-                                .onChange(of: publicQuestion) { _, _ in answer = nil; message = nil }
-                            Button("Research the web", systemImage: "globe") { respond(research: true) }
-                                .disabled(!canRequest || publicQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                                .frame(minHeight: 44)
-                            if let url = browserURL {
-                                Link("Open in browser", destination: url).frame(minHeight: 44)
-                            }
-                        } else if decision.route == .recall {
-                            Text("This needs your private notebook history. Close Scout and use Find a note in the notebook menu. No public search was started.")
+                            Text("Write a public research question. Remove names, private decisions and confidential details. Only the question below is sent for web research.")
+                            TextField("Public research question", text: Binding(get: { coordinator.publicQuestion }, set: {
+                                guard coordinator.publicQuestion != $0 else { return }
+                                coordinator.publicQuestion = $0
+                                coordinator.publicQuestionEdited()
+                            }), axis: .vertical)
+                                .lineLimit(2...6).disabled(coordinator.busy)
+                                .accessibilityIdentifier("publicResearchQuestion")
+                            Button("Research this public question", systemImage: "globe") { coordinator.answer(using: credentials, research: true) }
+                                .disabled(coordinator.busy || !credentials.canProcess || coordinator.publicQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                .frame(minHeight: 44).accessibilityIdentifier("researchPublicQuestion")
+                            if let url = browserURL { Link("Open public question in browser", destination: url).frame(minHeight: 44) }
+                        } else if decision.route == .quickResponse {
+                            Button("Write a quick answer", systemImage: "sparkles") { coordinator.answer(using: credentials, research: false) }
+                                .disabled(coordinator.busy || !credentials.canProcess).frame(minHeight: 44)
                         } else if decision.route == .clarify {
-                            Text("Add the subject and the specific question, then ask again. Scout will wait for more context.")
-                        } else if decision.route == .none {
-                            Text("This looks like a note to keep writing. No answer or research was started.")
+                            Text("What subject or missing detail should Scout use for this selection?")
+                            Button("Defer for now") { coordinator.dismissSuggestion(); dismiss() }.frame(minHeight: 44)
                         }
-                        if decision.usedFallback {
-                            Text("Routed with Responses because Decisions was unavailable.").font(.caption).foregroundStyle(.secondary)
-                        }
-                    } header: { Text("Next step") }
+                        if decision.usedFallback { Text("Routing used Responses because Decisions was unavailable.").font(.caption).foregroundStyle(.secondary) }
+                    }
                 }
-                if let answer {
+                if let suggestion = coordinator.suggestion, !suggestion.answer.isEmpty {
+                    Section(suggestion.isFixture ? "Fictional demo answer" : "AI suggestion") {
+                        Text(.init(suggestion.answer)).textSelection(.enabled)
+                        Text(suggestion.caveat).font(.caption).foregroundStyle(.secondary)
+                        ForEach(suggestion.evidence) { evidence in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Label(evidence.kind == .fixture ? "Fictional source" : (evidence.kind == .web ? "Web source" : "Your notes"),
+                                      systemImage: evidence.kind == .web ? "globe" : "doc.text")
+                                    .font(.caption.weight(.semibold))
+                                if let url = evidence.url {
+                                    Link(evidence.title, destination: url).frame(minHeight: 44, alignment: .leading)
+                                    Text(url.host ?? "Web source").font(.caption).foregroundStyle(.secondary)
+                                }
+                                else { Label(evidence.title, systemImage: evidence.kind == .fixture ? "airplane" : "doc.text") }
+                                Text(evidence.excerpt).font(.callout).foregroundStyle(.secondary)
+                                if let date = evidence.fetchedAt { Text("Retrieved \(date.formatted(date: .abbreviated, time: .shortened))").font(.caption).foregroundStyle(.secondary) }
+                            }
+                        }
+                        Picker("Place AI block", selection: $placement) {
+                            ForEach(BlockPlacement.allCases) { Text($0.rawValue).tag($0) }
+                        }.accessibilityIdentifier("blockPlacement")
+                        Button("Insert editable AI block", systemImage: "plus.rectangle.on.rectangle") {
+                            guard coordinator.validate(), let current = coordinator.suggestion else { return }
+                            insert(current, placement); coordinator.dismissSuggestion(); dismiss()
+                        }
+                        .disabled(!coordinator.canInsert).frame(minHeight: 44).accessibilityIdentifier("insertAIBlock")
+                    }
+                    Section("Follow up with this evidence") {
+                        TextField("Follow-up question", text: $coordinator.followUp, axis: .vertical).lineLimit(2...5)
+                        Button("Ask using existing evidence") { coordinator.answer(using: credentials, research: false, followUp: true) }
+                            .disabled(coordinator.busy || coordinator.followUp.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !credentials.canProcess)
+                            .frame(minHeight: 44)
+                        Text("Existing sources stay attached. For fresh research, edit and review the public question above.").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                if let message = coordinator.message {
                     Section {
-                        Text(.init(answer.text)).textSelection(.enabled)
-                        ForEach(answer.citations, id: \.url) { citation in
-                            Link(citation.title, destination: citation.url).frame(minHeight: 44, alignment: .leading)
+                        Text(message).accessibilityIdentifier("scoutError")
+                        if coordinator.suggestion?.state == .failed {
+                            Button("Retry") {
+                                if coordinator.transcript.isEmpty { coordinator.recognise(using: credentials) }
+                                else if coordinator.decision != nil { coordinator.answer(using: credentials, research: coordinator.decision?.route == .webResearch) }
+                                else { coordinator.route(using: credentials) }
+                            }.frame(minHeight: 44).disabled(coordinator.busy)
                         }
-                    } header: { Text(answer.citations.isEmpty ? "AI answer · no web search" : "AI research · web sources") }
-                }
-                if let message {
-                    Section { Text(message).foregroundStyle(.red).accessibilityIdentifier("scoutError") }
+                    }
                 }
                 Section {
-                    Text("\(credentials.jobs) of \(ScoutSession.jobLimit) jobs used this session").font(.caption).foregroundStyle(.secondary)
-                    Text("Cancel stops waiting for the result; remote processing and billing may continue. You can retry explicitly. No requests run automatically while you write.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Dismiss suggestion", role: .destructive) { coordinator.dismissSuggestion(); dismiss() }.frame(minHeight: 44).accessibilityIdentifier("dismissSuggestion")
+                    Button("Mute this topic for 5 minutes") { coordinator.mute(); dismiss() }.frame(minHeight: 44)
                 }
             }
             .tint(NotebookTheme.burgundy)
             .navigationTitle("Ask Scout").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { cancel(); dismiss() } } }
-            .onAppear {
-                if selection != nil && question.isEmpty {
-                    question = "Answer any question written in this selection; otherwise briefly explain the selected content."
-                }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Settings", systemImage: "gearshape") { settings = true } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
-            .onDisappear(perform: cancel)
+            .sheet(isPresented: $settings) { ScoutSettingsSheet(credentials: credentials, coordinator: coordinator) }
+            .task { await coordinator.refreshUsage(credentials) }
         }
     }
-
     private var browserURL: URL? {
-        let query = publicQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
+        let query = coordinator.publicQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return nil }
         var components = URLComponents(string: "https://www.google.com/search")!
         components.queryItems = [URLQueryItem(name: "q", value: query)]
         return components.url
     }
+}
 
-    private func classify() {
-        clearResult()
-        let context = selection != nil && includeContext
-            ? "The burgundy outline marks the selected content. Focus on that content; consider the surrounding canvas as context. " : ""
-        let input = context + question
-        let image = includeContext ? selection?.contextPNG : selection?.png
-        run(activity: "Checking how to help…") { provider in
-            let result = try await provider.route(input, image: image)
-            try Task.checkCancellation()
-            decision = result
-            if result.route == .quickResponse {
-                guard credentials.jobs < ScoutSession.jobLimit else { message = "Session limit reached. Start a new app session to continue."; return }
-                credentials.jobs += 1
-                activity = "Writing a quick answer…"
-                let response = try await provider.answer(input, research: false, image: image)
-                try Task.checkCancellation()
-                answer = response
-            }
-        }
-    }
-
-    private func respond(research: Bool) {
-        let input = research ? publicQuestion : question
-        answer = nil
-        run(activity: "Researching the web…") { provider in
-            let response = try await provider.answer(input, research: research)
-            try Task.checkCancellation()
-            answer = response
-        }
-    }
-
-    private func run(activity label: String, operation: @escaping @MainActor (OpenAIAssistance) async throws -> Void) {
-        guard canRequest else { return }
-        credentials.jobs += 1
-        message = nil
-        activity = label
-        let id = UUID()
-        generation = id
-        let provider = OpenAIAssistance(apiKey: credentials.apiKey)
-        task = Task { @MainActor in
-            do { try await operation(provider) }
-            catch {
-                if !Task.isCancelled && generation == id {
-                    message = (error as? AssistanceError)?.localizedDescription ?? "Could not connect to OpenAI. Check your connection and try again."
+struct ScoutSettingsSheet: View {
+    @ObservedObject var credentials: ScoutSession
+    @ObservedObject var coordinator: AssistanceCoordinator
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Assistance") {
+                    Picker("Mode", selection: $credentials.mode) {
+                        ForEach(ScoutSession.Mode.allCases) { Text($0.rawValue).tag($0) }
+                    }.accessibilityIdentifier("modePicker")
+                    Text("Explicit only waits for Ask AI. Automatic reads a bounded changed region after a 1.8 second pause, with a 20 second cooldown. It leaves a quiet pin and never opens this inspector or starts web research. Review transcription and a public question before researching.").font(.caption).foregroundStyle(.secondary)
+                    Toggle("Fictional offline demo", isOn: $credentials.offline).disabled(coordinator.busy).accessibilityIdentifier("providerMode")
+                    if credentials.offline {
+                        Picker("Demo scenario", selection: $credentials.scenario) {
+                            Text("Grounded example").tag(FixtureScenario.grounded)
+                            Text("Ambiguous handwriting").tag(FixtureScenario.ambiguous)
+                            Text("Network failure").tag(FixtureScenario.failed)
+                            Text("Stale source example").tag(FixtureScenario.stale)
+                            Text("Conflicting sources").tag(FixtureScenario.conflicting)
+                        }.disabled(coordinator.busy).accessibilityIdentifier("scenarioPicker")
+                    }
+                }
+                if !credentials.offline {
+                    Section {
+                        if credentials.hasDevelopmentKey { Label("API key available for this session", systemImage: "key") }
+                        else { SecureField("Your OpenAI API key", text: $credentials.apiKey).textInputAutocapitalization(.never).autocorrectionDisabled().disabled(coordinator.busy) }
+                        if !credentials.apiKey.isEmpty {
+                            Button("Forget key", role: .destructive) { coordinator.cancel(); credentials.forgetKey() }.frame(minHeight: 44)
+                        }
+                        Toggle("Allow OpenAI processing", isOn: $credentials.consent)
+                    } header: { Text("Personal prototype · OpenAI") } footer: {
+                        Text("Recognition sends the selected canvas image to OpenAI. Routing and quick answers send the corrected text. Web research sends only your separately reviewed public question. Automatic mode may recognise and route changed handwriting after a pause. Your key stays in memory until forgotten or the app closes. Responses use store=false; this does not mean zero retention. API use is billed to your OpenAI project.")
+                    }
+                }
+                Section("Session usage · live requests") {
+                    LabeledContent("Requests", value: "\(coordinator.usage.requests)")
+                    LabeledContent("Input / output tokens", value: "\(coordinator.usage.inputTokens) / \(coordinator.usage.outputTokens)")
+                    LabeledContent("Tool calls", value: "\(coordinator.usage.toolCalls)")
+                    LabeledContent("Total request time", value: String(format: "%.1f s", coordinator.usage.latencySeconds))
+                    if coordinator.usage.unreportedTokenRequests > 0 { Text("\(coordinator.usage.unreportedTokenRequests) requests did not report tokens; totals are partial.").font(.caption) }
+                    Text("Token and tool totals are measured when returned by the provider. No dollar estimate is shown. Offline fixtures are excluded. Cancel stops waiting; remote work and billing may continue.").font(.caption).foregroundStyle(.secondary)
                 }
             }
-            guard generation == id else { return }
-            activity = nil
-            task = nil
-        }
-    }
-
-    private func clearResult() {
-        decision = nil
-        answer = nil
-        message = nil
-        publicQuestion = ""
-    }
-
-    private func cancel() {
-        generation = UUID()
-        task?.cancel()
-        task = nil
-        activity = nil
-    }
-
-    private func symbol(_ route: AssistanceRoute) -> String {
-        switch route {
-        case .quickResponse: "sparkles"
-        case .webResearch: "globe"
-        case .recall: "clock"
-        case .clarify: "questionmark.bubble"
-        case .none: "pencil"
+            .navigationTitle("Scout settings").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .onChange(of: credentials.mode) { _, mode in if mode != .automatic { coordinator.stopAutomatic() }; if mode == .off { coordinator.cancel() } }
+            .onChange(of: credentials.consent) { _, allowed in if !allowed && !credentials.offline { coordinator.cancel() } }
+            .task { await coordinator.refreshUsage(credentials) }
         }
     }
 }

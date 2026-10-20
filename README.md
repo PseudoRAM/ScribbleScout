@@ -2,13 +2,17 @@
 
 A native, pen-first notebook for iPad, built with SwiftUI and PencilKit. Capture handwriting, sketches, and typed notes in a small local library.
 
-**Current milestone: local notes, on-device semantic search, and explicit AI assistance.** Local search uses Apple’s available English sentence embeddings with text matching as a fallback. Ask Scout routes typed questions and lassoed canvas images through OpenAI Decisions to quick answers, cited web research, or a browser search. The live Swift API smoke check passed on 20 October 2026. Automatic handwriting recognition and pause-triggered assistance remain planned; reference-page cards still contain example content.
+**Current milestone: a complete explicit pen-to-evidence implementation.** Lasso a region, inspect and correct its transcription, review a separate public question, run cited research, and insert an editable AI block with preserved sources and undo. Source changes invalidate pending results; intact translated ink can retain its anchor. Ask Scout starts in clearly labelled fictional offline mode; live mode uses your own key and processing consent. Optional pause assistance recognises and routes a bounded changed region, leaving a quiet review pin; public research still requires explicit query review. Real handwriting accuracy and the full live-iPad demo remain hands-on validation tasks. See [the demo script](docs/DEMO.md) and [recognition/toolchain notes](docs/RECOGNITION.md).
 
 ## What works today
 
 - Create, rename, search, select, and reopen notes with titles and dates.
 - Find notes by meaning and exact terms, with matching excerpts, using an on-device vector index.
-- Ask Scout about typed text or a lassoed canvas region: get a quick answer, research with citations, or open a public question in the browser.
+- Inspect and correct selected handwriting transcription, then ask for a quick answer or explicitly review a public research question.
+- Inspect real web sources and caveats, then insert, edit, move, delete, undo and reopen labelled AI blocks without rewriting ink.
+- Continue drawing while research runs; source pins show progress and stale results are withheld.
+- Rehearse with clearly labelled fictional offline scenarios, or use live OpenAI with session credentials, consent and measured usage.
+- Optionally recognise and route changed handwriting after a pause, with topic dismissal/mute and a cooldown; automatic mode never starts public search.
 - Write with Apple Pencil, or enable finger drawing for the simulator and touch input.
 - Use a pen, highlighter, stroke eraser, or lasso, with ink color and width controls.
 - Undo and redo ink edits; pinch to zoom, explore an expanding canvas in any direction, and return to the start.
@@ -55,7 +59,7 @@ cd ScribbleScout
 open ScribbleScout.xcodeproj
 ```
 
-In Xcode, choose the **ScribbleScout** scheme and an installed iPad simulator, then Run (⌘R). Local note-taking needs no credentials or backend. Optional Ask Scout assistance uses your own OpenAI API key supplied at launch in Debug or entered at runtime.
+In Xcode, choose the **ScribbleScout** scheme and an installed iPad simulator, then Run (⌘R). Local notes and fictional offline assistance need no credentials or backend. For live assistance, open Ask Scout → Settings, turn off Fictional offline demo, provide your own OpenAI API key and enable processing. Debug launches can supply your local key without bundling it.
 
 ### Run on an iPad
 
@@ -69,7 +73,7 @@ If signing fails with a rejected account login, sign in again in Xcode before re
 
 ## Secrets and local configuration
 
-The notebook works without credentials. Ask Scout uses OpenAI; no database, sync, or other provider keys are needed yet. `.env.example` lists the one credential to prepare. The `gpt-6-luna` Decisions, Responses, and web-search paths passed a synthetic live check; image extraction and broader evaluation remain in [BIL-6](https://linear.app/billabyteau/issue/BIL-6/verify-live-openai-access-and-choose-supported-model-paths).
+The notebook and fictional offline assistance work without credentials. Live Ask Scout uses OpenAI; no database, sync, or other provider keys are needed. `.env.example` lists the one credential to prepare. The `gpt-6-luna` Decisions, Responses transcription, web-search and structured-synthesis paths passed synthetic live checks on 20 October 2026. Real handwriting evaluation remains separate from these API checks.
 
 ### What to prepare now
 
@@ -81,7 +85,7 @@ The notebook works without credentials. Ask Scout uses OpenAI; no database, sync
    (umask 077; cp -n .env.example .env.local)
    ```
 
-4. `.env.local` is a plaintext local convenience for the Mac-side API check or a future backend. It is ignored by Git and is **not loaded by the current app**. Keep it outside the Xcode target and Copy Bundle Resources. For Debug runs, the local launcher below passes this key to the app process at launch. Otherwise, enter your own key in Ask Scout; it is never bundled.
+4. `.env.local` is a plaintext local convenience for the Mac-side API check or a future backend. It is ignored by Git and is **not loaded by the current app**. Keep it outside the Xcode target and Copy Bundle Resources. For Debug runs, the local launcher below passes this key to the app process at launch. Otherwise, open Ask Scout → Settings, turn off Fictional offline demo, and enter your own key; it is never bundled.
 
 ### How this works in Swift
 
@@ -93,7 +97,7 @@ For the managed TestFlight/App Store edition, the shared OpenAI key belongs in t
 
 ### Local Debug key with manual fallback
 
-The app reads `OPENAI_API_KEY` from its launch environment in Debug builds only. It never reads `.env.local` from the app bundle. If the variable is absent, blank, or malformed, Ask Scout shows the secure key field. Release builds ignore this variable and use manual entry. **Forget key** clears the active session credential and reveals the field; it does not edit the Mac's `.env.local`. Processing permission remains a separate opt-in.
+The app reads `OPENAI_API_KEY` from its launch environment in Debug builds only. It never reads `.env.local` from the app bundle. If the variable is absent, blank, or malformed, live-mode settings show the secure key field. Release builds ignore this variable and use manual entry. **Forget key** clears the active session credential and reveals the field; it does not edit the Mac's `.env.local`. Processing permission remains a separate opt-in.
 
 After installing a current Debug build locally, launch it on the connected iPad with:
 
@@ -166,7 +170,7 @@ A disposable `search-index.json` beside the note folders stores searchable excer
 
 Search updates after a short pause, including unsaved title/text edits. Unchanged searchable text reuses its vectors; dates, scrolling, paper changes, and ink-only edits do not re-embed text. Model revision/dimension changes rebuild the cache. Searches use only the current notebook records and reject stale text; records absent from that notebook are removed from the next cache update. A missing or unreadable cache rebuilds from the notes. Cache write failures leave search usable in memory and show a status message; they never prevent note saves. No cloud fallback or model download is requested. If the English model is unavailable, search uses text matching; relaunch after system model availability changes.
 
-There is no cloud sync or analytics. Ask Scout sends your question and, for a lasso request, the previewed canvas image to OpenAI after processing is enabled. Nearby context is included by default; the preview marks the selected focus, and you can switch context off. Other notebook content and local search results are not uploaded. Web research sends only a separately entered public question, without the canvas image. Storage recovery protects against an interrupted save; it is not an external backup. Uninstalling the app removes its local notes. Export, deletion, and multi-page notebooks are not part of this first version.
+There is no cloud sync or analytics. Live Ask Scout sends the previewed selected crop for transcription after processing is enabled, then sends corrected text for routing and quick answers. Other notebook content and local search results are not uploaded. Recognition sends only the selected crop; the current review flow excludes nearby context. Web research sends only a separately entered public question, without the canvas image. Storage recovery protects against an interrupted save; it is not an external backup. Uninstalling the app removes its local notes. Page image sharing includes accepted AI blocks. AI blocks can be deleted; note-library deletion and multi-page notebooks are not part of this version.
 
 ## Tests
 
@@ -215,7 +219,11 @@ For a hands-on device check: create two notes, write and erase ink, undo/redo, z
 | `ScribbleScout/Models/NoteSearchIndex.swift` | Search chunks, disposable vector cache, cosine ranking, and exact terms |
 | `ScribbleScout/LocalSemanticSearch.swift` | Serial on-device Apple model inference and cache I/O |
 | `ScribbleScout/Models/OpenAIAssistance.swift` | Decisions routing, Responses fallback, answers, and cited web search |
-| `ScribbleScout/ScoutSheet.swift` | Explicit requests, session key, disclosure, cancellation, browser handoff |
+| `ScribbleScout/ScoutSheet.swift` | Transcription review, evidence inspector, credentials, modes and disclosure |
+| `ScribbleScout/AssistanceCoordinator.swift` | Request lifecycle, source validation, bounded pause assistance and topic suppression |
+| `ScribbleScout/AssistanceCanvasOverlay.swift` | Source pins, labelled blocks and block editing |
+| `ScribbleScout/Models/AssistanceRecords.swift` | Durable regions, requests, evidence, blocks, provider contract and usage ledger |
+| `ScribbleScout/Models/FixtureProvider.swift` | Clearly labelled account-free fictional scenarios |
 | `scripts/CheckOpenAI.swift` | Synthetic live account smoke check using the ignored local key |
 | `ScribbleScout/Notebook.swift` | Local snapshots, autosave sessions, and library state |
 | `ScribbleScout/InkCanvas.swift` | PencilKit bridge, paper rendering, viewport, and ink controls |
@@ -224,35 +232,45 @@ For a hands-on device check: create two notes, write and erase ink, undo/redo, z
 
 The starting content area is **1,000 × 1,400 points** (`NotebookPage.size`); the reference template is **1,448 × 1,026 points**. The scrollable canvas expands around these areas without moving existing ink coordinates. The paper grid renders only the visible region, and the minimap caches a small preview after ink settles. The implementation uses Apple's frameworks directly; no OwlLuna or other upstream application code was copied. Snapshot writes currently run synchronously and suit a small notebook; larger libraries may need background I/O.
 
-## Ask Scout and the routing plan
+## Ask Scout and the demo loop
 
-Open the **sparkles** button in the drawing toolbar, or **Page options → Ask Scout**. If no development key was supplied, enter your own API key. Enable OpenAI processing, then type or paste a short question. Alternatively, choose **Lasso**, draw around handwriting, typed text, or a sketch, then tap **Ask AI** beside the selection. Check the image preview and edit the question before sending. **Use nearby canvas context** is on by default: the image includes a 300-point margin around the lasso, and a burgundy outline identifies the focus. Switch it off to send only the masked selection. The app observes the lasso region using public touch APIs alongside PencilKit, without private selection APIs or clipboard access. Moving/editing ink or switching tools clears the captured region. Lasso images are not saved into notes or uploaded automatically.
+Open the sparkles button to type a question, or choose Lasso, surround handwriting or printed canvas content, and tap Ask AI. Scout starts in **Fictional offline demo** mode: examples are local, scripted and explicitly labelled. Settings offers grounded, ambiguous, failed, stale and conflicting-source examples. These are interaction fixtures, not live findings or recognition benchmarks.
+
+For a live selection, turn off offline mode in Settings, enter your own key if needed, and enable OpenAI processing. The crop preview is exactly the selected area sent for recognition. Tap **Recognise handwriting**, inspect uncertain tokens, and correct the editable transcript before **Use corrected text**. A quick-answer route offers an explicit answer action. A research route asks you to enter a minimal **Public research question** separately: remove names, private decisions and confidential content. The canvas image and private routing text are not forwarded to public search.
+
+Research runs while the inspector is closed and leaves a progress/ready pin near its source. Opening the pin reveals the short answer, caveat, source titles/domains and retrieval time. Open a supporting URL before trusting a claim. Choose a placement and **Insert editable AI block**; insertion avoids occupied ink/blocks. The separate labelled block can be edited, moved, deleted and undone using the canvas undo manager. Its original source, evidence and acceptance/edit timestamps persist in note metadata. Existing ink is unchanged. Switching notes cancels unfinished assistance; accepted blocks remain saved.
+
+Every source carries app-owned identity, bounds and a content fingerprint. Before displaying or inserting, the coordinator revalidates it. Unrelated ink can leave the source valid; an intact, uniquely identifiable translation can rebase the pin. Changed, erased, deleted or ambiguous source matches become stale. Original source bounds are retained to prevent repeated-validation drift. Source identity uses public drawing data, not stroke-array positions or unavailable OS 27 APIs.
 
 | Route | Behaviour |
 | --- | --- |
-| `quick_response` | Short Responses answer with no search tools. |
-| `web_research` | Enter a public question, then choose cited in-app research or **Open in browser**. Private routing text is not forwarded to search. |
-| `recall` | Direct you to the existing local notebook search; no public search. |
-| `clarify` | Wait for more context. Also used below the provisional Decisions confidence threshold of 0.75. |
-| `none` | Leave ordinary notes and requests to avoid assistance alone. |
+| quick_response | Explicit concise answer using corrected text, with no search tools. |
+| web_research | Separately review a public question, then run bounded cited research or open that question in the browser. |
+| recall | Direct you to the existing local notebook search; no public search or fabricated private-history answer. |
+| clarify | Review uncertain text or add missing context before continuing. |
+| none | Leave ordinary notes alone. |
 
-`URLSession` transport uses HTTPS, timeouts, request IDs, cancellation, and explicit retry through the action buttons. Decisions uses `gpt-6-luna`; a 403/404 or unavailable-model error falls back to a strict structured Responses router with the same model. Missing model access can still fail in the fallback. Authentication, rate limits, malformed output, and network failures do not silently retry.
+Settings offers Off, Explicit only and Automatic (opt in). Automatic waits 1.8 seconds after an ink change, captures a bounded changed region, recognises/routes it and leaves a review pin. It never opens the inspector or starts public search. A 20-second cooldown, one active job, a latest-only automatic queue, explicit-request priority, normalized dismissed topics and five-minute mute limit repetition. This is bounded in-app assistance, not indefinite background execution. Recognition still sends the crop to OpenAI in live automatic mode; processing consent is required.
 
-Responses calls use `store=false`; Decisions receives no undocumented storage flag. This is not Zero Data Retention. Research requires a completed search and returned HTTP(S) citation metadata. Sources are linked inline when annotation offsets are available and listed below. This validates provenance metadata, not claim support. Each research request allows at most three built-in tool calls. A local 20-job session cap counts routing and answers separately; a routing fallback may make two calls in one job. Token/cost reporting and held-out evaluation remain BIL-30/BIL-29 work.
+The transport uses HTTPS, request IDs, timeouts, cancellation and explicit retry. Decisions uses gpt-6-luna; unavailable endpoint/model/access responses can fall back to a strict structured Responses router with the same model. This does not solve unavailable model access. Public research allows at most three built-in search calls, then uses a tool-free structured synthesis call whose source IDs must match actual returned citations. Code validates required fields, safe URLs, a short answer and a caveat; it does not establish that every source entails every claim. Inspect the sources.
 
-The plan remains: verify actual API access (BIL-6), connect selected handwriting and revision-safe requests (BIL-5/7/9/12), validate evidence and canvas insertion (BIL-13–16), then add opt-in pause detection, cooldown, and mute (BIL-18). The explicit typed/selected-image flow implements parts of BIL-6/10/11/19; it does not complete those issues. Reference-page cards remain illustrative.
+Responses uses store=false; Decisions receives no undocumented storage flag. This is not Zero Data Retention. Session credentials are never persisted. A 60-stage session cap is a local convenience control, not an enforceable hosted quota. The usage ledger counts HTTP requests (including fallback, synthesis and failures), returned input/output tokens, tool calls and latency. Missing token reports are shown as partial totals; fictional fixtures do not count as billable usage. No dollar estimate is claimed.
 
-Official contracts checked 20 October 2026: [Decisions](https://developers.openai.com/api/docs/guides/decisions) (public beta), [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs), [web search](https://developers.openai.com/api/docs/guides/tools-web-search), and [GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna).
+### Reproduce API checks
 
-Run the live smoke check from the repository root (three synthetic operations, billable to your API project):
+These operations are billable to your API project. They read the ignored local credential without executing dotenv content and print only synthetic results/public source metadata:
 
 ```sh
-xcrun swiftc -parse-as-library ScribbleScout/Models/OpenAIAssistance.swift \
+xcrun swiftc -parse-as-library ScribbleScout/Models/*.swift \
   scripts/CheckOpenAI.swift -o /tmp/scribble-scout-check-openai
 /tmp/scribble-scout-check-openai
+/tmp/scribble-scout-check-openai --recognition
+/tmp/scribble-scout-check-openai --routes
 ```
 
-The check reads `OPENAI_API_KEY` from the environment or `.env.local` without evaluating shell code. It prints routing latency, answer length, and public source titles/URLs; never the key or raw API error bodies. The Swift check passed on 20 October 2026: Decisions selected `quick_response` in 1.38 seconds without fallback, a quick answer returned, and web research returned a citation to the official Decisions documentation. Earlier restricted requests failed before authentication; the successful check ran with network access. The synthetic selected-image check (`--image`) also passed: Decisions chose a quick response and Responses read an arithmetic image correctly. Handwriting accuracy still needs real-device evaluation. Six additional synthetic routing examples also passed: quick answer, current web question, private recall, ambiguity, ordinary notes, and explicit no-research instructions. This is a smoke test, not a held-out accuracy estimate. Run `/tmp/scribble-scout-check-openai --routes` to repeat them.
+On 20 October 2026, the integrated pipeline returned a Decisions quick_response in 1.24 seconds, a quick answer and a cited result from the official Decisions documentation through retrieval plus structured synthesis. Four requests reported 9,508 input tokens, 265 output tokens and one search tool call. A separate generated printed-arithmetic image was transcribed correctly in 2.67 seconds (426 input/25 output tokens, no reported uncertainty). These are small synthetic smoke checks, not handwriting or end-to-end meeting benchmarks. The first arithmetic check exposed an overly narrow handwriting-only instruction; the prompt now correctly transcribes both handwritten and printed canvas text.
+
+See [DEMO.md](docs/DEMO.md) for the two-minute script, recording/fallback instructions and physical-device failure checklist. Reference-page concept cards are opt-in and labelled fictional; they do not represent live research.
 
 ## Next milestones
 
@@ -260,6 +278,6 @@ The roadmap is tracked in [AI Notebook: Pen to Evidence](https://linear.app/bill
 
 - [BIL-8: Local notebook foundation](https://linear.app/billabyteau/issue/BIL-8/build-the-swiftuipencilkit-workspace-with-durable-local-notes) — implemented and tested.
 - [BIL-5: Device and recognition feasibility](https://linear.app/billabyteau/issue/BIL-5/verify-the-real-ipad-sdk-and-handwriting-recognition-path) — device deployment verified; recognition evaluation remains.
-- [BIL-7: Shared assistance records and fixtures](https://linear.app/billabyteau/issue/BIL-7/define-shared-notebook-records-and-deterministic-provider-fixtures), followed by selected-handwriting recognition, cited research, and anchored evidence.
+- [BIL-7: Shared assistance records and fixtures](https://linear.app/billabyteau/issue/BIL-7/define-shared-notebook-records-and-deterministic-provider-fixtures) now underpin reviewed recognition, cited research, anchored pins and persisted blocks. See [the demo checklist](docs/DEMO.md) for the remaining physical-device validation.
 
-Audio, calendar integration, spatial handwriting recall, sync, and hosted services are outside this initial milestone. Local text recall is now available through notebook search; the reference page’s assistance cards remain static examples. A project licence has not been selected yet; that decision and the full open-source release checklist remain in [BIL-24](https://linear.app/billabyteau/issue/BIL-24/prepare-a-reproducible-credential-free-open-source-release).
+Audio, calendar integration, spatial handwriting recall, sync, and hosted services are outside this initial milestone. Local text recall is now available through notebook search; the reference page’s assistance cards remain opt-in static examples. A project licence has not been selected yet; that decision and the full open-source release checklist remain in [BIL-24](https://linear.app/billabyteau/issue/BIL-24/prepare-a-reproducible-credential-free-open-source-release).

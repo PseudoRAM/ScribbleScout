@@ -372,16 +372,17 @@ private struct NoteEditor: View {
     var openNotebook: () -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @StateObject private var controls = CanvasControls()
+    @StateObject private var assistance = AssistanceCoordinator()
     @State private var selectedTool: DrawingTool = .pen
     @State private var inkColor = NotebookTheme.ink
     @State private var width = 3.0
     @State private var editingText = false
     @State private var showingScout = false
-    @State private var scoutSelection: CanvasSelection?
     @State private var contextAction: ContextAction?
     @State private var sharedPage: SharedPage?
     @State private var selectedPhoto: PhotosPickerItem?
     @AppStorage("fingerDrawing") private var fingerDrawing = false
+    @State private var showingConceptCards = false
 
     private var tool: PKTool {
         switch selectedTool {
@@ -405,14 +406,21 @@ private struct NoteEditor: View {
                 }
                 InkCanvas(session: session, controls: controls, tool: tool, fingerDrawing: fingerDrawing)
                 .overlay(alignment: .topLeading) {
-                    if session.note.template == .checkout {
+                    if session.note.template == .checkout && showingConceptCards {
                         CanvasAnnotations(session: session, viewport: controls.viewport) { contextAction = $0 }
                     }
                 }
                 .overlay {
-                    LassoAssistanceOverlay(controls: controls, viewport: controls.viewport) { selection in
-                        scoutSelection = selection
+                    if assistance.region?.id != controls.selection?.region.id || assistance.region == nil {
+                        LassoAssistanceOverlay(controls: controls, viewport: controls.viewport) { selection in
+                            assistance.prepare(selection, region: selection.region)
+                            showingScout = true
+                        }
                     }
+                }
+                .overlay {
+                    AssistanceCanvasOverlay(session: session, coordinator: assistance, viewport: controls.viewport,
+                                            controls: controls) { showingScout = true }
                 }
                 .clipped()
                 .overlay(alignment: .bottomTrailing) {
@@ -429,8 +437,41 @@ private struct NoteEditor: View {
             }
             .background(Color(uiColor: NotebookTheme.paper))
         }
-        .sheet(isPresented: $showingScout) { ScoutSheet(credentials: scout) }
-        .sheet(item: $scoutSelection) { selection in ScoutSheet(credentials: scout, selection: selection) }
+        .sheet(isPresented: $showingScout) {
+            ScoutSheet(credentials: scout, coordinator: assistance) { suggestion, placement in
+                let viewport = controls.viewport
+                let zoom = max(0.15, viewport.value.zoom)
+                let source = suggestion.request.region.bounds.cgRect
+                let ink = session.drawing.bounds
+                var x = (viewport.value.x + 48) / zoom
+                var y = (viewport.value.y + 100) / zoom
+                switch placement {
+                case .belowWriting:
+                    x = source.minX
+                    y = max(source.maxY, ink.isNull ? source.maxY : ink.maxY) + 32
+                case .besideSource: x = source.maxX + 32; y = source.minY
+                case .visibleCanvas: break
+                }
+                var target = CGRect(x: x, y: y, width: 380, height: 300)
+                let obstacles = [source, ink].filter { !$0.isNull } + (session.note.blocks ?? []).map { $0.bounds.cgRect }
+                for _ in 0...obstacles.count {
+                    guard let obstacle = obstacles.first(where: { $0.insetBy(dx: -16, dy: -16).intersects(target) }) else { break }
+                    target.origin.y = obstacle.maxY + 32
+                }
+                _ = session.insertBlock(suggestion, at: CanvasBounds(target), undoManager: controls.undoManager)
+                controls.navigate(to: CGPoint(x: target.midX, y: target.midY))
+                controls.refresh()
+            }
+        }
+        .onAppear { assistance.resolveSource = { region in CanvasSource.resolve(region, note: session.note, drawing: session.drawing) } }
+        .onChange(of: session.note.drawingRevision) { _, _ in
+            if assistance.region != nil { assistance.validate() }
+            assistance.schedulePause(using: scout) { controls.captureChangedRegion() }
+        }
+        .onChange(of: session.note.text) { _, _ in if assistance.region != nil { assistance.validate() } }
+        .onChange(of: session.note.attachment) { _, _ in if assistance.region != nil { assistance.validate() } }
+        .onChange(of: scout.mode) { _, mode in if mode != .automatic { assistance.stopAutomatic() } }
+
         .sheet(isPresented: $editingText) { textSheet }
         .sheet(item: $contextAction) { action in contextSheet(action) }
         .sheet(item: $sharedPage) { page in ShareSheet(items: [page.image]) }
@@ -449,7 +490,7 @@ private struct NoteEditor: View {
         .alert("Photo", isPresented: Binding(get: { controls.message != nil }, set: { if !$0 { controls.message = nil } })) {
             Button("OK") { controls.message = nil }
         } message: { Text(controls.message ?? "") }
-        .onDisappear { session.flush() }
+        .onDisappear { assistance.cancel(); session.flush() }
     }
 
     private func header(compact: Bool) -> some View {
@@ -510,7 +551,8 @@ private struct NoteEditor: View {
             }
             Button("Return to canvas start", systemImage: "house", action: controls.resetZoom)
             Button("Typed notes", systemImage: "textformat") { editingText = true }
-            Button("Ask Scout", systemImage: "sparkles") { scoutSelection = nil; showingScout = true }
+            Button("Ask Scout", systemImage: "sparkles", action: openScout)
+            Toggle("Show fictional concept cards", isOn: $showingConceptCards)
             if session.note.attachment != nil {
                 Button("Remove photo", systemImage: "photo.badge.minus") { session.edit { $0.attachment = nil } }
             }
@@ -568,7 +610,7 @@ private struct NoteEditor: View {
 
     private var insertActions: some View {
         HStack(spacing: 8) {
-            Button { scoutSelection = nil; showingScout = true } label: { dockIcon("sparkles") }.accessibilityLabel("Ask Scout")
+            Button(action: openScout) { dockIcon("sparkles") }.accessibilityLabel("Ask Scout")
             Button { editingText = true } label: { dockIcon("textformat") }.accessibilityLabel("Typed notes")
             Button { controls.addRectangle(color: UIColor(inkColor), width: width) } label: { dockIcon("square") }
                 .accessibilityLabel("Insert rectangle")
@@ -654,6 +696,7 @@ private struct NoteEditor: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     Label(action.rawValue, systemImage: action.symbol).font(.title2.weight(.semibold))
+                    Text("Fictional concept card · static design example").font(.caption).foregroundStyle(.secondary)
                     Text(action.detail).font(.title3).lineSpacing(7)
                     if action == .research {
                         Link("Read Stripe Docs ↗", destination: URL(string: "https://docs.stripe.com/payments/checkout")!)
@@ -672,8 +715,16 @@ private struct NoteEditor: View {
         .presentationDetents([.medium, .large])
     }
 
+    private func openScout() {
+        if assistance.region == nil {
+            let region = CanvasSource.typedRegion(note: session.note)
+            assistance.prepare(nil, region: region)
+        }
+        showingScout = true
+    }
+
     private func share() {
-        let annotations = session.note.template == .checkout
+        let annotations = session.note.template == .checkout && showingConceptCards
             ? ImageRenderer(content: CheckoutAnnotations(session: session) { _ in }).uiImage : nil
         guard let image = controls.pageImage(annotations: annotations) else { return }
         sharedPage = SharedPage(image: image)

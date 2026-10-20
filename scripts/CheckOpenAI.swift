@@ -18,7 +18,7 @@ struct CheckOpenAI {
                 }
             }
             let provider = OpenAIAssistance(apiKey: key)
-            if CommandLine.arguments.contains("--image") {
+            if CommandLine.arguments.contains("--image") || CommandLine.arguments.contains("--recognition") {
                 let picture = NSImage(size: NSSize(width: 420, height: 140))
                 picture.lockFocus()
                 NSColor.white.setFill()
@@ -30,6 +30,21 @@ struct CheckOpenAI {
                 guard let tiff = picture.tiffRepresentation,
                       let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else {
                     throw AssistanceError.invalidInput
+                }
+                if CommandLine.arguments.contains("--recognition") {
+                    let start = Date()
+                    let result = try await provider.recognise(image: png)
+                    let normalized = result.text.filter { !$0.isWhitespace }
+                    guard normalized == "2+2=?" else {
+                        // Only this generated arithmetic image is used in this mode; never print notebook text.
+                        print("Synthetic extraction mismatch: \(result.text)")
+                        throw AssistanceError.invalidResponse
+                    }
+                    let usage = await provider.ledger.summary
+                    print("Synthetic printed-text extraction passed in \(String(format: "%.2f", Date().timeIntervalSince(start)))s; uncertainty items: \(result.uncertainty.count)")
+                    print("Reported input/output tokens: \(usage.inputTokens)/\(usage.outputTokens); requests with unreported tokens: \(usage.unreportedTokenRequests)")
+                    print("This does not measure real handwriting accuracy.")
+                    return
                 }
                 let prompt = "Answer any question written in this selection; otherwise briefly explain the selected content. Reply with digits only."
                 let route = try await provider.route(prompt, image: png)
@@ -66,6 +81,8 @@ struct CheckOpenAI {
             let research = try await provider.answer("Find the official OpenAI documentation for the Decisions API. Summarize its purpose in one sentence with a citation.", research: true)
             print("Research: \(research.citations.count) cited sources")
             for source in research.citations { print("\(source.title): \(source.url.absoluteString)") }
+            let usage = await provider.ledger.summary
+            print("Session requests: \(usage.requests); reported input/output tokens: \(usage.inputTokens)/\(usage.outputTokens); tools: \(usage.toolCalls); partial-token requests: \(usage.unreportedTokenRequests)")
         } catch {
             // Never dump provider bodies, request headers, environment variables, or the credential.
             print((error as? AssistanceError)?.localizedDescription ?? "Live check failed. Check network access to api.openai.com and retry.")

@@ -27,6 +27,7 @@ struct NoteRecord: Codable, Identifiable, Equatable, Sendable {
     var template: NoteTemplate?
     var keptResearch: Bool?
     var attachment: Data?
+    var blocks: [InsertedBlock]?
 
     static var checkoutExample: Self {
         let date = Date(timeIntervalSince1970: 1_792_454_400) // 20 October 2026, UTC.
