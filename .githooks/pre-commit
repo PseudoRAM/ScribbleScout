@@ -17,6 +17,9 @@ def private_path(path):
     return (
         (name == ".env" or name.startswith(".env.")) and name != ".env.example"
         or "secrets" in parts
+        or any(part in {"build", "build-device", ".build", "deriveddata", "__pycache__"}
+               or part.endswith((".app", ".xcarchive", ".dsym")) for part in parts)
+        or name.endswith((".ipa", ".pyc", ".pyo"))
         or name in {"secrets.plist", "secrets.xcconfig"}
         or name.endswith((".local.xcconfig", ".p8", ".p12", ".pfx", ".pem", ".key",
                           ".mobileprovision", ".provisionprofile"))
@@ -31,7 +34,7 @@ SECRET_PATTERNS = (
 
 def problem(path, content):
     if private_path(path):
-        return "local credential/signing file"
+        return "local credential, signing file, or build artifact"
     if any(re.search(pattern, content) for pattern in SECRET_PATTERNS):
         return "possible provider key or private key"
     if PurePosixPath(path).name.lower() == ".env.example":

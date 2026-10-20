@@ -4,7 +4,7 @@ import Combine
 import SwiftUI
 @testable import ScribbleScout
 
-@Suite("Notebook persistence and editing")
+@Suite("Notebook persistence and editing", .serialized)
 struct NotebookTests {
     @Test
     func testOnDeviceSearchPersistsAndRebuildsItsDisposableCache() async throws {
@@ -468,6 +468,63 @@ struct NotebookTests {
             let existing = try JSONDecoder().decode(NoteRecord.self, from: JSONSerialization.data(withJSONObject: legacy))
             #expect(existing.template == nil)
             #expect(NotebookPage.size(for: existing) == CGSize(width: 1000, height: 1400))
+        }
+    }
+
+    @MainActor
+    @Test
+    func testLassoCropMasksNeighboursAndDoesNotChangeInkOrClipboard() throws {
+        try withRepository { repository in
+            let red = UIGraphicsImageRenderer(size: CGSize(width: 300, height: 300)).image { output in
+                UIColor.red.setFill()
+                output.fill(CGRect(x: 0, y: 0, width: 300, height: 300))
+            }
+            let note = NoteRecord(attachment: red.pngData())
+            let originalInk = drawing()
+            let session = NoteSession(note: note, drawing: originalInk, repository: repository)
+            let controls = CanvasControls()
+            let host = UIHostingController(rootView: InkCanvas(session: session, controls: controls,
+                                                             tool: PKLassoTool(), fingerDrawing: true))
+            let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 600, height: 500)
+            window.rootViewController = host
+            window.isHidden = false
+            defer { window.isHidden = true; window.rootViewController = nil }
+            host.view.layoutIfNeeded()
+            let canvas = try #require(controls.canvas)
+            let clipboardVersion = UIPasteboard.general.changeCount
+            controls.captureSelection(outline: [CGPoint(x: 60, y: 60), CGPoint(x: 260, y: 60), CGPoint(x: 60, y: 260)])
+            let selected = try #require(controls.selection)
+            #expect(selected.bounds == CGRect(x: 60, y: 60, width: 200, height: 200))
+            #expect(selected.image.size == CGSize(width: 400, height: 400))
+            #expect(selected.contextBounds == CGRect(x: -240, y: -240, width: 800, height: 800))
+            #expect(selected.contextImage.size == CGSize(width: 1600, height: 1600))
+            let contextCG = try #require(selected.contextImage.cgImage)
+            let contextPixel = try #require(contextCG.cropping(to: CGRect(x: 960, y: 960, width: 1, height: 1)))
+            let data = try #require(contextPixel.dataProvider?.data)
+            let bytes = try #require(CFDataGetBytePtr(data))
+            #expect(min(bytes[0], bytes[1], bytes[2]) < 120, "The nearby red photo must remain available as context outside the lasso")
+            let cg = try #require(selected.image.cgImage)
+            var pixels = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
+            try pixels.withUnsafeMutableBytes { bytes in
+                let context = try #require(CGContext(data: bytes.baseAddress, width: cg.width, height: cg.height,
+                                                     bitsPerComponent: 8, bytesPerRow: cg.width * 4,
+                                                     space: CGColorSpaceCreateDeviceRGB(),
+                                                     bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+                context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+            }
+            // Outside the triangular lasso must be white, even though a photo fills its bounding box.
+            let outside = (360 * cg.width + 360) * 4
+            #expect(pixels[outside] > 240 && pixels[outside + 1] > 240 && pixels[outside + 2] > 240)
+            #expect(canvas.drawing.dataRepresentation() == originalInk.dataRepresentation())
+            #expect(UIPasteboard.general.changeCount == clipboardVersion)
+            controls.captureSelection(outline: [CGPoint(x: 0, y: 0), CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])
+            #expect(controls.selection == nil, "A drag or tap must not become a selected region")
+            controls.captureSelection(outline: [CGPoint(x: -8000, y: -6000), CGPoint(x: -3000, y: -6000),
+                                               CGPoint(x: -3000, y: -1000), CGPoint(x: -8000, y: -1000)])
+            let large = try #require(controls.selection)
+            #expect(max(large.image.size.width, large.image.size.height) <= 1600)
         }
     }
 
