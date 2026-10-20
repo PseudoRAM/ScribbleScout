@@ -400,7 +400,7 @@ private final class PaperView: UIView {
         didSet {
             // Ink, save metadata, and the viewport do not change the paper pixels.
             if note.paper != oldValue.paper || note.template != oldValue.template ||
-                note.text != oldValue.text || note.attachment != oldValue.attachment {
+                note.text != oldValue.text || note.attachment != oldValue.attachment || note.meetingEvidence != oldValue.meetingEvidence {
                 setNeedsDisplay()
             }
         }
@@ -414,7 +414,16 @@ private final class PaperView: UIView {
             image.draw(in: CGRect(x: 60, y: 60,
                                   width: width, height: width * image.size.height / image.size.width))
         }
-        if !note.text.isEmpty && note.template == nil {
+        if let evidence = note.meetingEvidence {
+            (note.title as NSString).draw(at: CGPoint(x: 60, y: 50), withAttributes: [.font: UIFont.boldSystemFont(ofSize: 28), .foregroundColor: UIColor(NotebookTheme.ink)])
+            for source in evidence {
+                guard let bounds = source.bounds else { continue }
+                let heading = "\(source.claim ?? "Note") · \(source.meetingDate?.formatted(date: .abbreviated, time: .omitted) ?? "") · Fictional"
+                ((heading + "\n\n" + source.excerpt) as NSString).draw(in: bounds.cgRect,
+                    withAttributes: [.font: UIFont.systemFont(ofSize: 25), .foregroundColor: UIColor(NotebookTheme.ink)])
+            }
+        }
+        if !note.text.isEmpty && note.template == nil && note.meetingEvidence == nil {
             (note.text as NSString).draw(in: CGRect(x: 60, y: note.attachment == nil ? 60 : 400,
                                                    width: bounds.width - 120, height: bounds.height - 140),
                                        withAttributes: [.font: UIFont(name: "Caveat-Regular", size: 32) ?? .systemFont(ofSize: 28),
@@ -596,6 +605,7 @@ struct InkCanvas: UIViewRepresentable {
     var controls: CanvasControls
     var tool: PKTool
     var fingerDrawing: Bool
+    var readOnly = false
 
     func makeUIView(context: Context) -> UIView {
         let container = CanvasContainer()
@@ -616,6 +626,7 @@ struct InkCanvas: UIViewRepresentable {
         canvas.paper.note = session.note
         canvas.pattern.style = session.note.paper
         canvas.tool = tool
+        canvas.drawingGestureRecognizer.isEnabled = !readOnly
         canvas.drawingPolicy = fingerDrawing ? .anyInput : .pencilOnly
         canvas.accessibilityLabel = "Handwriting canvas"
         canvas.accessibilityValue = session.note.template == .checkout ? CheckoutPaper.transcript : session.note.text
@@ -638,6 +649,7 @@ struct InkCanvas: UIViewRepresentable {
         if let ink = tool as? PKInkingTool, (canvas.tool as? PKInkingTool) != ink { canvas.tool = ink }
         if let eraser = tool as? PKEraserTool, (canvas.tool as? PKEraserTool) != eraser { canvas.tool = eraser }
         if tool is PKLassoTool, !(canvas.tool is PKLassoTool) { canvas.tool = tool }
+        canvas.drawingGestureRecognizer.isEnabled = !readOnly
         let policy: PKCanvasViewDrawingPolicy = fingerDrawing ? .anyInput : .pencilOnly
         if canvas.drawingPolicy != policy { canvas.drawingPolicy = policy }
         let contentChanged = canvas.paper.note != session.note

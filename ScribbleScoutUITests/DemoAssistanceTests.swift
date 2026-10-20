@@ -5,7 +5,7 @@ final class DemoAssistanceTests: XCTestCase {
     @MainActor
     func testFictionalResearchInsertEditAndReopen() throws {
         let app = XCUIApplication()
-        app.launchArguments = []
+        app.launchArguments = ["--offline-demo"]
         app.launch()
         app.buttons["Open notebook"].tap()
         app.buttons["newNote"].tap()
@@ -58,6 +58,69 @@ final class DemoAssistanceTests: XCTestCase {
         XCTAssertTrue(app.textViews["aiBlockText"].waitForExistence(timeout: 5))
         XCTAssertTrue((app.textViews["aiBlockText"].value as? String ?? "").contains("Reviewed for the fictional demo."))
         XCTAssertTrue(app.staticTexts["Original evidence"].exists)
+    }
+
+    @MainActor
+    func testDatedRecallOpensRegionAndReturnsToOriginalEditor() throws {
+        let app = XCUIApplication()
+        app.launch()
+        app.buttons["Open notebook"].tap()
+        app.buttons["newNote"].tap()
+        let originalTitle = app.textFields["noteTitle"].value as? String
+        app.buttons["Page options"].tap()
+        app.buttons["Recall dated meetings"].tap()
+        let source = app.buttons["openRecallSource"].firstMatch
+        reveal(source, in: app)
+        XCTAssertTrue(source.waitForExistence(timeout: 10))
+        source.tap()
+        XCTAssertTrue(app.buttons["Return to Recall"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Show source region"].exists)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Dated fictional meeting with cited region highlighted"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        app.buttons["Return to Recall"].tap()
+        XCTAssertTrue(app.navigationBars["Ask Scout"].waitForExistence(timeout: 5))
+        app.buttons["Done"].tap()
+        XCTAssertEqual(app.textFields["noteTitle"].value as? String, originalTitle)
+        XCTAssertTrue(app.buttons["Ask Scout"].exists)
+    }
+
+    @MainActor
+    func testCanvasResponseCardWithLargeTextAndDarkMode() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--offline-demo", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-AppleInterfaceStyle", "Dark"]
+        app.launch()
+        app.buttons["Open notebook"].tap()
+        app.buttons["newNote"].tap()
+        app.buttons["Ask Scout"].tap()
+        let question = app.descendants(matching: .any).matching(identifier: "scoutQuestion").firstMatch
+        XCTAssertTrue(question.waitForExistence(timeout: 5))
+        question.tap()
+        question.typeText("Explain a database index.")
+        let route = app.buttons["askScout"]
+        reveal(route, in: app)
+        route.tap()
+        let answer = app.buttons["Write a quick answer"]
+        reveal(answer, in: app)
+        XCTAssertTrue(answer.waitForExistence(timeout: 5))
+        answer.tap()
+        app.buttons["Done"].tap()
+        let card = app.descendants(matching: .any).matching(identifier: "scoutResponseCard").firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 5))
+        let portrait = XCTAttachment(screenshot: app.screenshot())
+        portrait.name = "Scout canvas response · large text dark portrait"
+        portrait.lifetime = .keepAlways
+        add(portrait)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        XCTAssertTrue(app.buttons["assistancePin"].isHittable)
+        let landscape = XCTAttachment(screenshot: app.screenshot())
+        landscape.name = "Scout canvas response · large text dark landscape"
+        landscape.lifetime = .keepAlways
+        add(landscape)
+        app.buttons["Dismiss Scout response"].tap()
+        XCTAssertFalse(card.exists)
     }
 
     @MainActor

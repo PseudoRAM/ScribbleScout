@@ -80,7 +80,7 @@ extension Suggestion {
     var hasValidEvidence: Bool {
         evidence.allSatisfy(\.isValid) &&
         (isFixture || !evidence.contains { $0.kind == .fixture }) &&
-        (!isFixture || evidence.allSatisfy { $0.kind == .fixture }) &&
+        (!isFixture || evidence.allSatisfy { $0.kind == .fixture || ($0.kind == .note && $0.isFictional == true) }) &&
         (request.intent != .recall || !evidence.filter { $0.kind == .note || (isFixture && $0.kind == .fixture) }.isEmpty) &&
         (request.intent != .webResearch || !evidence.filter { $0.kind == .web || (isFixture && $0.kind == .fixture) }.isEmpty) &&
         (request.sourceMode != .notes || !evidence.contains { $0.kind == .web }) &&
