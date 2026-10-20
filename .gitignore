@@ -5,8 +5,19 @@ build-device/
 DerivedData/
 xcuserdata/
 *.xcuserstate
+
+# Local credentials. Keep only the empty, documented template in Git.
 .env
 .env.*
 !.env.example
+[Ss]ecrets/
+[Ss]ecrets.xcconfig
+[Ss]ecrets.plist
+*.local.xcconfig
+*.p8
 *.p12
+*.pfx
+*.pem
+*.key
 *.mobileprovision
+*.provisionprofile
