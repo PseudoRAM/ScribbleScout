@@ -7,8 +7,10 @@ struct AssistanceCanvasOverlay: View {
     @ObservedObject var coordinator: AssistanceCoordinator
     @ObservedObject var viewport: CanvasViewport
     let controls: CanvasControls
+    var selectionMode = false
     var openInspector: () -> Void
     @State private var editing: InsertedBlock?
+    @GestureState private var blockDrag: [UUID: CGSize] = [:]
 
     var body: some View {
         GeometryReader { geometry in
@@ -18,6 +20,8 @@ struct AssistanceCanvasOverlay: View {
                 }
 
             }
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
+            .coordinateSpace(name: "blockCanvas")
             .overlay(alignment: .topLeading) {
                 if let region = coordinator.region,
                    coordinator.workPhase?.isAction == true || !coordinator.busy {
@@ -149,7 +153,26 @@ struct AssistanceCanvasOverlay: View {
         .padding(12).frame(width: max(240, min(460, rect.width)), alignment: .leading)
         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(NotebookTheme.burgundy.opacity(0.3), lineWidth: 1))
-        .offset(x: rect.minX, y: rect.minY)
+        .contentShape(Rectangle())
+        .gesture(DragGesture(minimumDistance: 3, coordinateSpace: .named("blockCanvas"))
+            .updating($blockDrag) { value, state, _ in state[block.id] = value.translation }
+            .onEnded { value in
+                move(block, by: value.translation)
+            }, including: selectionMode ? .all : .subviews)
+        .offset(x: rect.minX + (blockDrag[block.id]?.width ?? 0),
+                y: rect.minY + (blockDrag[block.id]?.height ?? 0))
+        .accessibilityHint(selectionMode ? "Drag to move this AI block." : "")
+        .accessibilityAction(named: "Move left") { move(block, by: CGSize(width: -44, height: 0)) }
+        .accessibilityAction(named: "Move right") { move(block, by: CGSize(width: 44, height: 0)) }
+        .accessibilityAction(named: "Move up") { move(block, by: CGSize(width: 0, height: -44)) }
+        .accessibilityAction(named: "Move down") { move(block, by: CGSize(width: 0, height: 44)) }
+    }
+
+    private func move(_ block: InsertedBlock, by translation: CGSize) {
+        let zoom = max(0.15, viewport.value.zoom)
+        session.moveBlock(block.id, to: CanvasBounds(block.bounds.cgRect.offsetBy(
+            dx: translation.width / zoom, dy: translation.height / zoom)), undoManager: controls.undoManager)
+        controls.refresh()
     }
 
     private func screenRect(_ bounds: CanvasBounds) -> CGRect {

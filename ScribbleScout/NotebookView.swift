@@ -350,9 +350,10 @@ private struct LassoAssistanceOverlay: View {
 }
 
 private enum DrawingTool: String, CaseIterable {
-    case pen = "Pen", marker = "Highlighter", eraser = "Eraser", lasso = "Lasso"
+    case select = "Select", pen = "Pen", marker = "Highlighter", eraser = "Eraser", lasso = "Lasso"
     var symbol: String {
         switch self {
+        case .select: "cursorarrow"
         case .pen: "pencil"
         case .marker: "highlighter"
         case .eraser: "eraser"
@@ -390,7 +391,7 @@ private struct NoteEditor: View {
         case .pen: PKInkingTool(.pen, color: UIColor(inkColor), width: width)
         case .marker: PKInkingTool(.marker, color: UIColor(inkColor).withAlphaComponent(0.35), width: width * 5)
         case .eraser: PKEraserTool(.vector)
-        case .lasso: PKLassoTool()
+        case .select, .lasso: PKLassoTool()
         }
     }
 
@@ -405,7 +406,9 @@ private struct NoteEditor: View {
                         Button("Retry") { session.flush() }.buttonStyle(.bordered)
                     }.foregroundStyle(.red).padding().background(.red.opacity(0.08))
                 }
-                InkCanvas(session: session, controls: controls, tool: tool, fingerDrawing: fingerDrawing)
+                InkCanvas(session: session, controls: controls, tool: tool,
+                          fingerDrawing: fingerDrawing || selectedTool == .select,
+                          capturesLassoRegion: selectedTool == .lasso)
                 .overlay(alignment: .topLeading) {
                     if session.note.template == .checkout && showingConceptCards {
                         CanvasAnnotations(session: session, viewport: controls.viewport) { contextAction = $0 }
@@ -421,7 +424,15 @@ private struct NoteEditor: View {
                 }
                 .overlay {
                     AssistanceCanvasOverlay(session: session, credentials: scout, coordinator: assistance, viewport: controls.viewport,
-                                            controls: controls) { showingScout = true }
+                                            controls: controls, selectionMode: selectedTool == .select) { showingScout = true }
+                }
+                .overlay(alignment: .top) {
+                    if selectedTool == .select {
+                        Text("Circle ink, then drag it to move. Drag AI blocks directly.")
+                            .font(.caption).padding(10)
+                            .background(.regularMaterial, in: Capsule())
+                            .padding(8).allowsHitTesting(false)
+                    }
                 }
                 .clipped()
                 .overlay(alignment: .bottomTrailing) {
@@ -691,6 +702,7 @@ private struct NoteEditor: View {
             .contentShape(Rectangle())
         }
         .accessibilityLabel(item.rawValue).accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityHint(item == .select ? "Circle handwriting or shapes, then drag to move. Drag AI blocks directly." : "")
     }
 
     private var textSheet: some View {
