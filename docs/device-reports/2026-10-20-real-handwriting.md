@@ -71,3 +71,13 @@ Updated development build installed successfully on the paired iPad. Executable 
 - [ ] Verify drawing continues during recognition.
 - [ ] Investigate reproducible failures, add practical regressions and retest fixes.
 - [ ] Assess remaining BIL-5/BIL-9 device criteria using the recorded evidence; close only when satisfied.
+
+## Follow-up build · live Automatic defaults and canvas responses
+
+Ben reported that the lasso flow was working (“This is great!” / “looks like all the steps are working”) and requested fictional offline mode off, OpenAI enabled when a key is available, Automatic detection enabled and streamed screen responses. This is positive interaction feedback, not a measured transcription result for S1–S6.
+
+The updated session starts live with Automatic mode and processing enabled when a runtime key exists. Without a key, it remains unavailable until one is entered; fictional offline examples are an explicit fallback. Clear handwriting proceeds through routing to an explanation, automatic web research using the recognised selected text, or local note recall. Uncertain handwriting waits for correction. Canvas images are excluded from public research. A canvas card shows progress, streamed quick-answer text, Stop, Review and Dismiss. Research displays its answer after citation/synthesis validation. Partial text clears on stop, failure or source change and cannot be inserted. The 20-second cooldown defers changed ink rather than silently dropping it.
+
+Verification against frozen source: **47 iOS tests and 30 Foundation tests passed**. New checks cover runtime-key defaults, forgetting/replacing a key, automatic answers/research/recall, work phases, partial output, cancellation, stale sources, SSE framing/Unicode, usage accounting and a truncated stream. Real OpenAI synthetic streaming returned **12 text updates**, first text **1.57 s**, completion **2.57 s**, reported **111 input / 84 output tokens**. This benchmark used a fictional database-index question on the workstation; it does not measure physical-iPad handwriting latency or Pencil feel.
+
+The signed Debug build installed successfully on the paired iPad mini. Executable SHA-256: `65658c2f10bff67dc140868303fe1fb74c1dce12746806950ce433d01cfab103`. Because concurrent tasks were editing the shared checkout, this build and its tests used `/tmp/scout-live-final-source`, an isolated frozen snapshot. Its source-manifest SHA-256 is `730505d8157a5507f482e5f60e2ef3bb6c9790a512d33b6d22bae2bcf9f51cfe`; the per-file manifest is versioned alongside this report. UI accessibility/landscape review is tracked separately below. The six handwriting samples and ticket completion gates remain pending.
