@@ -15,6 +15,7 @@ A native, pen-first notebook for iPad, built with SwiftUI and PencilKit. Capture
 - Automatically recognise changed handwriting and follow through to explanations, public research or local recall, with topic dismissal/mute and a cooldown.
 - Write with Apple Pencil, or enable finger drawing for the simulator and touch input.
 - Use a pen, highlighter, stroke eraser, or lasso, with ink color and width controls.
+- Choose Select to circle and move ink or shapes, or drag AI blocks directly; movement supports undo and saves automatically. Select accepts touch even when finger drawing is off. Photos and printed page content remain fixed.
 - Undo and redo ink edits; pinch to zoom, explore an expanding canvas in any direction, and return to the start.
 - Navigate with a collapsible minimap showing your notes and the current visible area.
 - Choose dotted, ruled, or blank paper and keep typed notes alongside each canvas.

@@ -38,6 +38,23 @@ final class DemoAssistanceTests: XCTestCase {
         app.buttons["Page options"].tap()
         app.buttons["Redo ink"].tap()
         XCTAssertTrue(edit.waitForExistence(timeout: 5))
+        app.buttons["Select"].tap()
+        let originalFrame = edit.frame
+        let grab = edit.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 1))
+            .withOffset(CGVector(dx: -100, dy: 40))
+        grab.press(forDuration: 0.1,
+                   thenDragTo: grab.withOffset(CGVector(dx: 70, dy: 60)),
+                   withVelocity: .slow, thenHoldForDuration: 0.1)
+        XCTAssertEqual(edit.frame.minX, originalFrame.minX + 70, accuracy: 4)
+        XCTAssertEqual(edit.frame.minY, originalFrame.minY + 60, accuracy: 4)
+        app.buttons["Undo ink"].tap()
+        XCTAssertEqual(edit.frame.minX, originalFrame.minX, accuracy: 4)
+        XCTAssertEqual(edit.frame.minY, originalFrame.minY, accuracy: 4)
+        app.buttons["Page options"].tap()
+        app.buttons["Redo ink"].tap()
+        XCTAssertEqual(edit.frame.minX, originalFrame.minX + 70, accuracy: 4)
+        XCTAssertEqual(edit.frame.minY, originalFrame.minY + 60, accuracy: 4)
+        app.buttons["Pen"].tap()
         let inserted = XCTAttachment(screenshot: app.screenshot())
         inserted.name = "Fictional research inserted as a separate AI block"
         inserted.lifetime = .keepAlways

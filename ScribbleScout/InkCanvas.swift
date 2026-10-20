@@ -438,6 +438,7 @@ private final class NotebookCanvasView: PKCanvasView {
     var readyForViewport = false
     var initialViewport = PageViewport()
     var viewportDidInitialize: (() -> Void)?
+    var capturesLassoRegion = true
     var lassoDidBegin: (() -> Void)?
     var lassoDidFinish: (([CGPoint]) -> Void)?
     var pageSize = NotebookPage.size
@@ -543,6 +544,7 @@ private final class LassoRegionGesture: UIGestureRecognizer, UIGestureRecognizer
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         guard trackedTouch == nil, touches.count == 1, let touch = touches.first,
               let canvas = view as? NotebookCanvasView, canvas.tool is PKLassoTool,
+              canvas.capturesLassoRegion, canvas.drawingGestureRecognizer.isEnabled,
               touch.type == .pencil || canvas.drawingPolicy == .anyInput else {
             state = state == .possible ? .failed : .cancelled
             return
@@ -612,6 +614,7 @@ struct InkCanvas: UIViewRepresentable {
     var tool: PKTool
     var fingerDrawing: Bool
     var readOnly = false
+    var capturesLassoRegion = true
 
     func makeUIView(context: Context) -> UIView {
         let container = CanvasContainer()
@@ -632,6 +635,7 @@ struct InkCanvas: UIViewRepresentable {
         canvas.paper.note = session.note
         canvas.pattern.style = session.note.paper
         canvas.tool = tool
+        canvas.capturesLassoRegion = capturesLassoRegion
         canvas.drawingGestureRecognizer.isEnabled = !readOnly
         canvas.drawingPolicy = fingerDrawing ? .anyInput : .pencilOnly
         canvas.accessibilityLabel = "Handwriting canvas"
@@ -655,6 +659,15 @@ struct InkCanvas: UIViewRepresentable {
         if let ink = tool as? PKInkingTool, (canvas.tool as? PKInkingTool) != ink { canvas.tool = ink }
         if let eraser = tool as? PKEraserTool, (canvas.tool as? PKEraserTool) != eraser { canvas.tool = eraser }
         if tool is PKLassoTool, !(canvas.tool is PKLassoTool) { canvas.tool = tool }
+        if canvas.capturesLassoRegion != capturesLassoRegion {
+            canvas.capturesLassoRegion = capturesLassoRegion
+            // Clear PencilKit's previous selection when changing between Select and Scout's lasso.
+            canvas.tool = PKInkingTool(.pen)
+            canvas.tool = tool
+        }
+        canvas.accessibilityHint = tool is PKLassoTool && !capturesLassoRegion
+            ? "Circle ink, then drag the selection to move it. Use two fingers to pan or pinch to zoom."
+            : "Write with Apple Pencil. Pinch to zoom. Use two fingers to scroll when finger drawing is on."
         canvas.drawingGestureRecognizer.isEnabled = !readOnly
         let policy: PKCanvasViewDrawingPolicy = fingerDrawing ? .anyInput : .pencilOnly
         if canvas.drawingPolicy != policy { canvas.drawingPolicy = policy }
