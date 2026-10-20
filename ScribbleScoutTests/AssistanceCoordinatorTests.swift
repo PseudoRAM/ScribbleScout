@@ -145,6 +145,61 @@ struct AssistanceCoordinatorTests {
         #expect(await provider.callCount == 3, "Equivalent dismissed topics should recognise locally but not route again")
     }
 
+    @Test
+    func explicitAnswerOwnsAutomaticResultAndPreventsLaterPauseFromReplacingIt() async {
+        let settings = ScoutSession()
+        settings.mode = .automatic
+        let provider = ControlledProvider(held: [.answer])
+        let coordinator = AssistanceCoordinator()
+        coordinator.pauseDelay = .zero
+        coordinator.automaticCooldown = 0
+        coordinator.providerFactory = { _ in provider }
+        coordinator.resolveSource = { $0 }
+        let original = selection(region("Original automatic source"))
+        coordinator.schedulePause(using: settings) { original }
+        await provider.waitForCalls(2)
+        await nextMainTurn()
+        coordinator.answer(using: settings, research: false)
+        await provider.waitForCalls(3)
+        let later = selection(region("Later handwriting"))
+        await withCheckedContinuation { continuation in
+            coordinator.schedulePause(using: settings) { continuation.resume(); return later }
+        }
+        await idle(coordinator) { Task { await provider.release(.answer) } }
+        await nextMainTurn()
+        #expect(coordinator.suggestion?.state == .ready)
+        #expect(coordinator.suggestion?.request.region.id == original.region.id)
+        #expect(coordinator.region?.id == original.region.id)
+        #expect(await provider.callCount == 3, "A later writing pause must not replace an explicitly requested answer")
+    }
+
+    @Test
+    func queuedSourceInvalidatedBeforeDrainIsNeverUploadedForRecognition() async {
+        let settings = ScoutSession()
+        settings.mode = .automatic
+        let provider = ControlledProvider(held: [.recognition])
+        let coordinator = AssistanceCoordinator()
+        coordinator.pauseDelay = .zero
+        coordinator.automaticCooldown = 0
+        coordinator.providerFactory = { _ in provider }
+        var invalidated = Set<UUID>()
+        coordinator.resolveSource = { invalidated.contains($0.id) ? nil : $0 }
+        let original = selection(region("Still current"))
+        let queued = selection(region("Edited before processing"))
+        coordinator.schedulePause(using: settings) { original }
+        await provider.waitForCalls(1)
+        await withCheckedContinuation { continuation in
+            coordinator.schedulePause(using: settings) { continuation.resume(); return queued }
+        }
+        invalidated.insert(queued.region.id)
+        await provider.release(.recognition)
+        await provider.waitForCalls(2)
+        await nextMainTurn()
+        #expect(await provider.callCount == 2, "Only original recognition and routing should reach the provider")
+        #expect(coordinator.region?.id != queued.region.id)
+        #expect(!coordinator.busy)
+    }
+
     @Test(arguments: [AssistanceRoute.none, .recall])
     func nonAssistanceAndPrivateRecallLeaveNoCanvasSuggestion(route: AssistanceRoute) async {
         let settings = ScoutSession()
