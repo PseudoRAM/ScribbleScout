@@ -8,7 +8,10 @@ struct NotebookView: View {
     @State private var showingNotebook = false
 
     private var filteredNotes: [NoteRecord] {
-        store.notes.filter { search.isEmpty || $0.title.localizedCaseInsensitiveContains(search) || $0.text.localizedCaseInsensitiveContains(search) }
+        let notes = store.searchableNotes
+        if search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return notes }
+        let byID = Dictionary(uniqueKeysWithValues: notes.map { ($0.id, $0) })
+        return store.searchMatches.compactMap { byID[$0.id] }
     }
 
     var body: some View {
@@ -37,6 +40,7 @@ struct NotebookView: View {
         .tint(NotebookTheme.burgundy)
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
+        .onChange(of: search) { _, query in store.search(query) }
         .alert("Notebook notice", isPresented: Binding(get: { store.issue != nil }, set: { if !$0 { store.issue = nil } })) {
             Button("OK") { store.issue = nil }
         } message: { Text(store.issue ?? "") }
@@ -67,7 +71,14 @@ struct NotebookView: View {
                 TextField("Find a note", text: $search).accessibilityLabel("Find a note").autocorrectionDisabled()
             }
             .padding(12).background(.black.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
-            .padding(.horizontal, 20).padding(.bottom, 20)
+            .padding(.horizontal, 20).padding(.bottom, 8)
+            Text(store.searchStatus)
+                .font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier("searchStatus")
+                .padding(.horizontal, 22).padding(.bottom, 16)
+            Text("Searches titles and typed notes")
+                .font(.caption).foregroundStyle(.secondary)
+                .padding(.horizontal, 22).padding(.bottom, 12)
             Text("YOUR NOTEBOOK").font(.caption.weight(.semibold)).tracking(1.4)
                 .foregroundStyle(.secondary).padding(.horizontal, 22).padding(.bottom, 8)
             List(filteredNotes) { note in
@@ -80,6 +91,10 @@ struct NotebookView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             Text(note.title.isEmpty ? "Untitled note" : note.title).font(.headline).lineLimit(2)
                             Text(note.updatedAt, format: .dateTime.month(.abbreviated).day()).font(.caption).foregroundStyle(.secondary)
+                            if !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                               let match = store.searchMatches.first(where: { $0.id == note.id }) {
+                                Text(match.excerpt).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                            }
                         }
                         Spacer(minLength: 0)
                         if note.id == store.current?.id { Image(systemName: "checkmark").foregroundStyle(NotebookTheme.burgundy) }
@@ -87,7 +102,12 @@ struct NotebookView: View {
                 }.accessibilityIdentifier("note-\(note.id)")
             }
             .listStyle(.plain)
-            .overlay { if filteredNotes.isEmpty && !search.isEmpty { ContentUnavailableView.search(text: search) } }
+            .overlay {
+                if filteredNotes.isEmpty && !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    if store.isSearching { ProgressView("Searching…") }
+                    else { ContentUnavailableView.search(text: search) }
+                }
+            }
             Divider().padding(.horizontal, 20)
             Label("Your notes stay on this iPad", systemImage: "internaldrive")
                 .font(.caption).foregroundStyle(.secondary).padding(20)

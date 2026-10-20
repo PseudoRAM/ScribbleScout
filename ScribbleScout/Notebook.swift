@@ -97,6 +97,7 @@ final class NoteSession: ObservableObject, Identifiable {
     private var pendingSave: Task<Void, Never>?
     private var dirty = false
     var onSave: ((NoteRecord) -> Void)?
+    var onSearchableChange: (() -> Void)?
 
     init(note: NoteRecord, drawing: PKDrawing, repository: LocalNotebook) {
         id = note.id
@@ -107,9 +108,12 @@ final class NoteSession: ObservableObject, Identifiable {
     }
 
     func edit(_ change: (inout NoteRecord) -> Void) {
+        let previousTitle = note.title
+        let previousText = note.text
         change(&note)
         note.updatedAt = Date()
         scheduleSave()
+        if note.title != previousTitle || note.text != previousText { onSearchableChange?() }
     }
 
     func setDrawing(_ value: PKDrawing) {
@@ -159,12 +163,25 @@ final class NotebookStore: ObservableObject {
     @Published private(set) var notes: [NoteRecord] = []
     @Published private(set) var current: NoteSession?
     @Published var issue: String?
+    @Published private(set) var searchMatches: [NoteSearchMatch] = []
+    @Published private(set) var searchStatus = "Preparing on-device search…"
+    @Published private(set) var isSearching = false
     private var repository: LocalNotebook?
+    private var semanticSearch: LocalSemanticSearch?
+    private var searchQuery = ""
+    private var searchedDocuments: [NoteSearchDocument]?
+    private var searchTask: Task<Void, Never>?
+
+    var searchableNotes: [NoteRecord] {
+        guard let current else { return notes }
+        return notes.map { $0.id == current.id ? current.note : $0 }
+    }
 
     init() {
         do {
             let repository = try LocalNotebook.applicationStore()
             self.repository = repository
+            semanticSearch = LocalSemanticSearch(cacheURL: repository.root.appendingPathComponent("search-index.json"))
             let listing = try repository.list()
             notes = listing.notes
             if !listing.warnings.isEmpty { issue = listing.warnings.joined(separator: "\n\n") }
@@ -180,6 +197,7 @@ final class NotebookStore: ObservableObject {
             }
             let lastID = UserDefaults.standard.string(forKey: "lastNote").flatMap(UUID.init(uuidString:))
             if let note = notes.first(where: { $0.id == lastID }) ?? notes.first { open(note.id) }
+            else { search("") }
         } catch { issue = "The local notebook could not be opened. \(error.localizedDescription)" }
     }
 
@@ -205,8 +223,44 @@ final class NotebookStore: ObservableObject {
             guard let self else { return }
             if let index = self.notes.firstIndex(where: { $0.id == note.id }) { self.notes[index] = note }
             self.notes.sort { $0.updatedAt > $1.updatedAt }
+            self.search(self.searchQuery)
+        }
+        session.onSearchableChange = { [weak self] in
+            guard let self else { return }
+            self.search(self.searchQuery)
         }
         current = session
         UserDefaults.standard.set(session.id.uuidString, forKey: "lastNote")
+        search(searchQuery)
+    }
+
+    func search(_ query: String) {
+        let documents = searchableNotes.map {
+            NoteSearchDocument(id: $0.id, title: $0.title,
+                               text: ($0.template == .checkout ? CheckoutPaper.transcript + "\n" : "") + $0.text)
+        }.sorted { $0.id.uuidString < $1.id.uuidString }
+        guard query != searchQuery || documents != searchedDocuments else { return }
+        searchQuery = query
+        searchedDocuments = documents
+        searchTask?.cancel()
+        searchMatches = []
+        searchStatus = "Searching on this iPad…"
+        guard let semanticSearch else { searchStatus = "Search unavailable"; isSearching = false; return }
+        isSearching = true
+        searchTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(200))
+                let response = try await semanticSearch.search(query, documents: documents)
+                try Task.checkCancellation()
+                self?.searchMatches = response.matches
+                self?.searchStatus = response.status
+                self?.isSearching = false
+            } catch is CancellationError {
+                return
+            } catch {
+                self?.searchStatus = "Search unavailable"
+                self?.isSearching = false
+            }
+        }
     }
 }

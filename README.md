@@ -2,11 +2,12 @@
 
 A native, pen-first notebook for iPad, built with SwiftUI and PencilKit. Capture handwriting, sketches, and typed notes in a small local library.
 
-**Current milestone: the local notebook foundation.** AI recognition and research are planned; they are not implemented yet. The app works offline and makes no network requests.
+**Current milestone: the local notebook foundation with on-device semantic search.** Handwriting recognition and live AI research are planned. The app makes no network requests; search uses Apple’s locally available English sentence embedding model, with text matching when that model is unavailable.
 
 ## What works today
 
 - Create, rename, search, select, and reopen notes with titles and dates.
+- Find notes by meaning and exact terms, with matching excerpts, using an on-device vector index.
 - Write with Apple Pencil, or enable finger drawing for the simulator and touch input.
 - Use a pen, highlighter, stroke eraser, or lasso, with ink color and width controls.
 - Undo and redo ink edits; pinch to zoom and return to fit width.
@@ -112,7 +113,7 @@ The hook checks common mistakes, not every possible secret, and can be bypassed.
 
 ## Using the notebook
 
-Create a note with **New note** and edit its title at the top. Switch between **Handwriting** and **Text** to add ink or typed notes to the same record. Search matches note titles and typed text; it does not recognise handwriting yet.
+Create a note with **New note** and edit its title at the top. Switch between **Handwriting** and **Text** to add ink or typed notes to the same record. Search combines exact terms with semantic matches in titles and typed text, plus the built-in reference page transcript. Results show the best matching excerpt and open the source note. It does not recognise handwriting or text inside photos yet. The search status identifies on-device English semantic search or text-only fallback. Other languages can still match text, but semantic results use the English model.
 
 In Handwriting mode, the toolbar provides the drawing tools, color, and width. **Page options** (the ellipsis button) changes paper and toggles finger drawing.
 
@@ -136,7 +137,11 @@ Notes live in the app's `Application Support/ScribbleScout` directory, with one 
 
 Ink changes write an immutable drawing file first. The app then atomically commits metadata pointing to that file, retaining the previous complete snapshot. Obsolete ink is removed only after the commit, keeping files referenced by either snapshot. Autosave runs after a 350 ms pause; switching notes and backgrounding flush pending edits immediately.
 
-There is no cloud sync, analytics, AI processing, or note transmission. Storage recovery protects against an interrupted save; it is not an external backup. Uninstalling the app removes its local notes. Export, deletion, and multi-page notebooks are not part of this first version.
+A disposable `search-index.json` beside the note folders stores searchable excerpts, vectors, and the embedding model revision and dimensions. Apple’s [Natural Language sentence embeddings](https://developer.apple.com/documentation/naturallanguage/nlembedding) run locally on a serial background actor. Text is split at paragraph boundaries into windows of up to 400 characters; a linear cosine scan ranks matches alongside exact terms. A minimum cosine similarity of 0.4 filters semantic candidates; this is an initial heuristic, not a calibrated confidence score.
+
+Search updates after a short pause, including unsaved title/text edits. Unchanged searchable text reuses its vectors; dates, scrolling, paper changes, and ink-only edits do not re-embed text. Model revision/dimension changes rebuild the cache. Searches use only the current notebook records and reject stale text; records absent from that notebook are removed from the next cache update. A missing or unreadable cache rebuilds from the notes. Cache write failures leave search usable in memory and show a status message; they never prevent note saves. No cloud fallback or model download is requested. If the English model is unavailable, search uses text matching; relaunch after system model availability changes.
+
+There is no cloud sync, analytics, cloud AI processing, or note transmission. Storage recovery protects against an interrupted save; it is not an external backup. Uninstalling the app removes its local notes. Export, deletion, and multi-page notebooks are not part of this first version.
 
 ## Tests
 
@@ -148,7 +153,7 @@ For fast logic tests, run from the repository root:
 swift test
 ```
 
-This tests the app's actual Foundation-only note models through Swift Package Manager. It checks metadata round trips for every paper style, compatibility with existing notes that omit an ink filename, and rejection of damaged metadata. It builds only those models and tests; no app, simulator, signing, or network access is needed. The first run compiles the package; subsequent runs reuse the build.
+This tests the app's actual Foundation-only note models through Swift Package Manager. It checks metadata round trips for every paper style, compatibility with existing notes that omit an ink filename, and rejection of damaged metadata. It also verifies local cosine ranking with three fictional notes, exact-term fallback, cache round trips, text/model invalidation, removal of absent records, invalid vectors, and Unicode chunking. It builds only those models and tests; no app, simulator, signing, or network access is needed. The first run compiles the package; subsequent runs reuse the build.
 
 For PencilKit persistence, recovery, and autosave tests, run **Product → Test** (⌘U) in Xcode, or use an installed simulator:
 
@@ -180,6 +185,8 @@ For a hands-on device check: create two notes, write and erase ink, undo/redo, z
 | --- | --- |
 | `ScribbleScout/ScribbleScoutApp.swift` | App entry point and lifecycle save |
 | `ScribbleScout/Models/NoteRecord.swift` | Foundation-only note metadata shared with the fast unit test package |
+| `ScribbleScout/Models/NoteSearchIndex.swift` | Search chunks, disposable vector cache, cosine ranking, and exact terms |
+| `ScribbleScout/LocalSemanticSearch.swift` | Serial on-device Apple model inference and cache I/O |
 | `ScribbleScout/Notebook.swift` | Local snapshots, autosave sessions, and library state |
 | `ScribbleScout/InkCanvas.swift` | PencilKit bridge, paper rendering, viewport, and ink controls |
 | `ScribbleScout/NotebookView.swift` | Library, search, note editor, and drawing toolbar |
@@ -195,4 +202,4 @@ The roadmap is tracked in [AI Notebook: Pen to Evidence](https://linear.app/bill
 - [BIL-5: Device and recognition feasibility](https://linear.app/billabyteau/issue/BIL-5/verify-the-real-ipad-sdk-and-handwriting-recognition-path) — device deployment verified; recognition evaluation remains.
 - [BIL-7: Shared assistance records and fixtures](https://linear.app/billabyteau/issue/BIL-7/define-shared-notebook-records-and-deterministic-provider-fixtures), followed by selected-handwriting recognition, cited research, and anchored evidence.
 
-Audio, calendar integration, local recall, sync, and hosted services are outside this initial milestone. A project licence has not been selected yet; that decision and the full open-source release checklist remain in [BIL-24](https://linear.app/billabyteau/issue/BIL-24/prepare-a-reproducible-credential-free-open-source-release).
+Audio, calendar integration, spatial handwriting recall, sync, and hosted services are outside this initial milestone. Local text recall is available through notebook search; the reference page’s assistance cards remain static examples. A project licence has not been selected yet; that decision and the full open-source release checklist remain in [BIL-24](https://linear.app/billabyteau/issue/BIL-24/prepare-a-reproducible-credential-free-open-source-release).
