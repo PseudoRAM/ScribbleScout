@@ -5,226 +5,355 @@ import SwiftUI
 struct NotebookView: View {
     @ObservedObject var store: NotebookStore
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var searchFocused: Bool
     @State private var search = ""
     @State private var showingNotebook = false
+    @State private var selecting = false
+    @State private var selection: Set<UUID> = []
+    @State private var pendingDeletion: Set<UUID> = []
+    @State private var sort = LibrarySort.recent
     @StateObject private var scout = ScoutSession()
+
+    private enum LibrarySort: String, CaseIterable {
+        case recent = "Recently edited", oldest = "Oldest first", title = "Title"
+    }
 
     private var filteredNotes: [NoteRecord] {
         let notes = store.searchableNotes
-        if search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return notes }
-        let byID = Dictionary(uniqueKeysWithValues: notes.map { ($0.id, $0) })
-        return store.searchMatches.compactMap { byID[$0.id] }
+        let matches = Set(store.searchMatches.map(\.id))
+        let visible = isFiltering ? notes.filter { matches.contains($0.id) } : notes
+        return visible.sorted {
+            switch sort {
+            case .recent: return $0.updatedAt > $1.updatedAt
+            case .oldest: return $0.updatedAt < $1.updatedAt
+            case .title: return $0.title.localizedStandardCompare($1.title) == .orderedAscending
+            }
+        }
     }
 
     private var isFiltering: Bool {
         !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var deletionTitle: String {
+        if pendingDeletion.count == 1,
+           let note = store.searchableNotes.first(where: { pendingDeletion.contains($0.id) }) {
+            return "Delete “\(note.title.isEmpty ? "Untitled note" : note.title)”?"
+        }
+        return "Delete \(pendingDeletion.count) notes?"
+    }
+
     var body: some View {
-        GeometryReader { geometry in
-            Group {
-                if let session = store.current {
-                    NoteEditor(session: session, scout: scout, store: store) { showingNotebook.toggle() }
-                        .id(session.id).accessibilityHidden(showingNotebook).allowsHitTesting(!showingNotebook)
-                } else {
-                    ContentUnavailableView {
-                        Label("A little room to think.", systemImage: "pencil.and.scribble")
-                    } description: {
-                        Text("Capture an idea, sketch a plan, or start a fresh page.")
-                    } actions: {
-                        Button("Create your first note") { store.create() }.buttonStyle(.borderedProminent)
-                    }
+        ZStack {
+            if let session = store.current {
+                NoteEditor(session: session, scout: scout, store: store) {
+                    guard session.flush() else { store.issue = session.saveError; return }
+                    searchFocused = false
+                    showingNotebook = true
                 }
+                .id(session.id)
+                .accessibilityHidden(showingNotebook)
+                .allowsHitTesting(!showingNotebook)
             }
-            .frame(width: geometry.size.width, height: geometry.size.height)
-            .overlay(alignment: .leading) {
-                if showingNotebook {
-                    ZStack(alignment: .leading) {
-                        Color.black.opacity(0.32).ignoresSafeArea()
-                            .onTapGesture { showingNotebook = false }
-                            .accessibilityHidden(true)
-                        sidebar
-                            .frame(width: min(dynamicTypeSize.isAccessibilitySize ? 440 : 360, geometry.size.width - 24)).frame(maxHeight: .infinity)
-                            .background(Color(uiColor: NotebookTheme.paper))
-                            .clipShape(UnevenRoundedRectangle(bottomTrailingRadius: 24, topTrailingRadius: 24))
-                            .shadow(color: .black.opacity(0.12), radius: 20, x: 6)
-                            .transition(.move(edge: .leading))
-                    }
-                    .frame(width: geometry.size.width, height: geometry.size.height, alignment: .leading)
-                }
+            if showingNotebook || store.current == nil {
+                library
             }
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: showingNotebook)
         }
         .preferredColorScheme(.light)
         .tint(NotebookTheme.burgundy)
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
         .onChange(of: search) { _, query in store.search(query) }
+        .alert(deletionTitle, isPresented: Binding(
+            get: { !pendingDeletion.isEmpty },
+            set: { if !$0 { pendingDeletion = [] } }
+        )) {
+            Button("Cancel", role: .cancel) { pendingDeletion = [] }
+            Button("Delete", role: .destructive) {
+                store.delete(pendingDeletion)
+                selection.formIntersection(Set(store.notes.map(\.id)))
+                if selection.isEmpty { selecting = false }
+                pendingDeletion = []
+            }
+        } message: {
+            Text("This permanently removes the selected notes, including their handwriting, photos and saved Scout blocks, from this iPad. This cannot be undone.")
+        }
         .alert("Notebook notice", isPresented: Binding(get: { store.issue != nil }, set: { if !$0 { store.issue = nil } })) {
             Button("OK") { store.issue = nil }
         } message: { Text(store.issue ?? "") }
     }
 
-    private var sidebar: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                HStack(spacing: 12) {
-                    Image("NotebookAppIcon")
-                        .resizable().scaledToFit().frame(width: 48, height: 48)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Scribble Scout").font(.headline)
-                        Text("A little room to think.")
-                            .font(.caption).foregroundStyle(NotebookTheme.muted)
-                    }
-                    Spacer(minLength: 0)
-                    Button { showingNotebook = false } label: {
-                        Image(systemName: "xmark").font(.system(size: 16, weight: .medium))
-                            .frame(width: 44, height: 44)
-                            .background(.white.opacity(0.7), in: Circle())
-                    }
-                    .accessibilityLabel("Close notebook")
-                    .keyboardShortcut(.escape, modifiers: [])
-                }
-
-                Button {
-                    store.create()
-                    showingNotebook = false
-                } label: {
-                    HStack {
-                        Label("New note", systemImage: "square.and.pencil")
-                        Spacer()
-                        Image(systemName: "plus")
-                    }
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 16).frame(minHeight: 48)
-                }
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.roundedRectangle(radius: 14))
-                .keyboardShortcut("n", modifiers: .command).accessibilityIdentifier("newNote")
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "magnifyingglass").foregroundStyle(NotebookTheme.muted)
-                        TextField("Find a note", text: $search, prompt: Text("Find a note").foregroundStyle(NotebookTheme.muted))
-                            .focused($searchFocused)
-                            .accessibilityLabel("Find a note").autocorrectionDisabled()
-                            .submitLabel(.search)
-                        if !search.isEmpty {
-                            Button { search = ""; searchFocused = true } label: {
-                                Image(systemName: "xmark.circle.fill").frame(width: 44, height: 44)
-                            }
-                            .foregroundStyle(NotebookTheme.muted)
-                            .accessibilityLabel("Clear search")
+    private var library: some View {
+        GeometryReader { geometry in
+            let compact = geometry.size.width < 600 || dynamicTypeSize.isAccessibilitySize
+            let inset: CGFloat = compact ? 20 : 40
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    libraryHeader(compact: compact)
+                        .padding(.bottom, 24)
+                    Group {
+                        if compact {
+                            VStack(alignment: .leading, spacing: 12) { searchField; libraryActions }
+                        } else {
+                            HStack(spacing: 16) { searchField; libraryActions.fixedSize(horizontal: true, vertical: false) }
                         }
                     }
-                    .padding(.leading, 14).padding(.trailing, search.isEmpty ? 14 : 0)
-                    .frame(minHeight: 48)
-                    .background(.white, in: RoundedRectangle(cornerRadius: 14))
-                    .overlay(RoundedRectangle(cornerRadius: 14)
-                        .strokeBorder(searchFocused ? NotebookTheme.burgundy : NotebookTheme.ink.opacity(0.12), lineWidth: 1))
+                    .padding(.bottom, 20)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(selecting ? "\(selection.count) selected" : "\(filteredNotes.count) \(filteredNotes.count == 1 ? "note" : "notes")")
+                            .font(.subheadline.weight(.medium))
+                        if selecting {
+                            HStack(spacing: 16) {
+                                Button("Select all shown") { selection.formUnion(filteredNotes.map(\.id)) }
+                                    .disabled(filteredNotes.isEmpty)
+                                    .frame(minHeight: 44)
+                                Button("Clear") { selection = [] }
+                                    .disabled(selection.isEmpty).frame(minHeight: 44)
+                            }
+                        }
+                    }
+                    .foregroundStyle(NotebookTheme.muted)
                     if isFiltering {
                         HStack(spacing: 8) {
                             if store.isSearching { ProgressView().controlSize(.small) }
                             Text(store.searchStatus).accessibilityIdentifier("searchStatus")
                         }
                         .font(.caption).foregroundStyle(NotebookTheme.muted)
-                        .padding(.horizontal, 4)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(isFiltering ? "Search results" : "Your notebook")
-                            .font(.title2.weight(.semibold))
-                            .accessibilityAddTraits(.isHeader)
-                        Spacer(minLength: 4)
-                        Text(filteredNotes.count, format: .number)
-                            .font(.subheadline.monospacedDigit()).foregroundStyle(NotebookTheme.muted)
-                    }
-                    if !isFiltering {
-                        Text("Most recently edited")
-                            .font(.caption).foregroundStyle(NotebookTheme.muted)
-                    }
-                    LazyVStack(spacing: 8) {
-                        ForEach(filteredNotes) { note in noteRow(note) }
+                        .padding(.bottom, 12)
                     }
                     if filteredNotes.isEmpty && !store.isSearching {
                         ContentUnavailableView {
-                            Label(isFiltering ? "No notes found" : "A fresh start", systemImage: isFiltering ? "magnifyingglass" : "doc.text")
+                            Label(isFiltering ? "No notes found" : "A little room to think.",
+                                  systemImage: isFiltering ? "magnifyingglass" : "pencil.and.scribble")
                         } description: {
-                            Text(isFiltering ? "Try another word from a title or typed note." : "Tap New note to capture your first idea.")
+                            Text(isFiltering ? "Try another word from a title or typed note." : "Start a fresh page for your next idea.")
+                        } actions: {
+                            if isFiltering {
+                                Button("Show all notes") { search = "" }
+                            } else {
+                                Button("Create your first note", action: createNote)
+                                    .buttonStyle(.borderedProminent).foregroundStyle(.white)
+                            }
                         }
+                        .padding(.top, 40)
+                    } else {
+                        LazyVGrid(columns: dynamicTypeSize.isAccessibilitySize ? [GridItem(.flexible())] : [GridItem(.adaptive(minimum: compact ? 260 : 300), spacing: 16)], spacing: 16) {
+                            ForEach(filteredNotes) { note in noteCard(note) }
+                        }
+                        .padding(.vertical, 8)
                     }
                 }
+                .padding(.horizontal, inset).padding(.top, compact ? 20 : 32)
+                .frame(maxWidth: 1400).frame(maxWidth: .infinity)
             }
-            .padding(20)
-        }
-        .scrollDismissesKeyboard(.interactively)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            Label("Saved on this iPad", systemImage: "internaldrive")
+            .scrollDismissesKeyboard(.interactively)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                HStack(spacing: 8) {
+                    Label("Saved on this iPad", systemImage: "internaldrive")
+                    Spacer(minLength: 0)
+                    if !compact { Text("Your ideas, all in one place.") }
+                }
                 .font(.caption).foregroundStyle(NotebookTheme.muted)
-                .frame(maxWidth: .infinity).padding(16)
+                .padding(.vertical, 16).padding(.horizontal, inset)
                 .background(Color(uiColor: NotebookTheme.paper))
-                .overlay(alignment: .top) { Divider().padding(.horizontal, 20) }
+                .overlay(alignment: .top) { Divider() }
+            }
+            .background(Color(uiColor: NotebookTheme.paper).ignoresSafeArea())
+            .foregroundStyle(NotebookTheme.ink)
         }
-        .foregroundStyle(NotebookTheme.ink)
-        .accessibilityAddTraits(.isModal)
-        .accessibilityAction(.escape) { showingNotebook = false }
         .accessibilityIdentifier("notebookNavigation")
     }
 
-    private func noteRow(_ note: NoteRecord) -> some View {
-        let selected = note.id == store.current?.id
-        let excerpt = isFiltering ? store.searchMatches.first(where: { $0.id == note.id })?.excerpt : nil
-        let preview = excerpt ?? (note.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? (note.template == .checkout ? "A sketch of the checkout flow" : "\(note.paper.title) paper · Ready for your ideas")
-            : note.text)
-        return Button {
-            store.open(note.id)
-            showingNotebook = false
-        } label: {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: note.template == .checkout ? "rectangle.3.group" : "doc.text")
-                    .font(.body).foregroundStyle(NotebookTheme.burgundy)
-                    .frame(width: 36, height: 44)
-                    .background(.white.opacity(0.8), in: RoundedRectangle(cornerRadius: 8))
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(note.title.isEmpty ? "Untitled note" : note.title)
-                        .font(.body.weight(.semibold)).lineLimit(2)
-                    Text(preview.replacingOccurrences(of: "\n", with: " "))
-                        .font(.subheadline).foregroundStyle(NotebookTheme.muted).lineLimit(2)
-                    HStack(spacing: 6) {
-                        Text(note.updatedAt, format: .dateTime.month(.abbreviated).day())
-                        if selected {
-                            Text("·")
-                            Text("Open").fontWeight(.medium)
-                        }
-                    }
-                    .font(.caption).foregroundStyle(selected ? NotebookTheme.burgundy : NotebookTheme.muted)
+    private func libraryHeader(compact: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 20) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    libraryBrand.fixedSize()
+                    Spacer(minLength: 16)
+                    backToNoteButton.fixedSize()
                 }
-                Spacer(minLength: 0)
-                if selected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(NotebookTheme.burgundy).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 12) {
+                    libraryBrand
+                    backToNoteButton
                 }
             }
-            .padding(14).frame(maxWidth: .infinity, alignment: .leading)
-            .background(selected ? NotebookTheme.burgundy.opacity(0.07) : .white.opacity(0.65),
-                        in: RoundedRectangle(cornerRadius: 16))
-            .overlay(RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(selected ? NotebookTheme.burgundy.opacity(0.4) : NotebookTheme.ink.opacity(0.08), lineWidth: 1))
-            .contentShape(RoundedRectangle(cornerRadius: 16))
+            if compact {
+                VStack(alignment: .leading, spacing: 16) { libraryTitle; newNoteButton }
+            } else {
+                HStack(alignment: .bottom) { libraryTitle; Spacer(minLength: 24); newNoteButton }
+            }
         }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(selected ? .isSelected : [])
-        .accessibilityIdentifier("note-\(note.id)")
     }
 
+    private var libraryBrand: some View {
+        HStack(spacing: 12) {
+            Image("NotebookAppIcon").resizable().scaledToFit().frame(width: 40, height: 40)
+                .clipShape(RoundedRectangle(cornerRadius: 10)).accessibilityHidden(true)
+            Text("Scribble Scout").font(.headline)
+        }
+    }
+
+    @ViewBuilder private var backToNoteButton: some View {
+        if store.current != nil {
+            Button {
+                selecting = false
+                selection = []
+                showingNotebook = false
+            } label: {
+                Label("Back to note", systemImage: "arrow.right")
+                    .font(.subheadline.weight(.medium)).frame(minHeight: 44)
+            }
+            .keyboardShortcut(.escape, modifiers: [])
+            .accessibilityIdentifier("backToNote")
+        }
+    }
+
+    private var libraryTitle: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Your notebook").font(.largeTitle.weight(.semibold)).accessibilityAddTraits(.isHeader)
+            Text("Space for every thought.").font(.body).foregroundStyle(NotebookTheme.muted)
+        }
+    }
+
+    private var newNoteButton: some View {
+        Button(action: createNote) {
+            Label("New note", systemImage: "square.and.pencil")
+                .font(.body.weight(.semibold)).foregroundStyle(.white).padding(.horizontal, 8).frame(minHeight: 44)
+        }
+        .buttonStyle(.borderedProminent).buttonBorderShape(.roundedRectangle(radius: 12))
+        .keyboardShortcut("n", modifiers: .command).accessibilityIdentifier("newNote")
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass").foregroundStyle(NotebookTheme.muted)
+            TextField("Find a note", text: $search)
+                .focused($searchFocused).accessibilityLabel("Find a note")
+                .autocorrectionDisabled().submitLabel(.search)
+            if !search.isEmpty {
+                Button { search = ""; searchFocused = true } label: {
+                    Image(systemName: "xmark.circle.fill").frame(width: 44, height: 44)
+                }
+                .foregroundStyle(NotebookTheme.muted).accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.leading, 16).padding(.trailing, search.isEmpty ? 16 : 0).frame(minWidth: 200, minHeight: 48)
+        .background(.white, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12)
+            .strokeBorder(searchFocused ? NotebookTheme.burgundy : NotebookTheme.ink.opacity(0.16), lineWidth: 1))
+    }
+
+    private var libraryActions: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 16) { sortControl; selectionControl; deleteControl }
+                .fixedSize(horizontal: true, vertical: false)
+            VStack(alignment: .leading, spacing: 8) { sortControl; selectionControl; deleteControl }
+        }
+        .font(.subheadline.weight(.medium))
+    }
+
+    private var sortControl: some View {
+        Menu {
+            Picker("Sort notes", selection: $sort) {
+                ForEach(LibrarySort.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }
+        } label: {
+            Label("Sort", systemImage: "arrow.up.arrow.down").frame(minHeight: 44)
+        }
+        .accessibilityLabel("Sort notes: \(sort.rawValue)")
+    }
+
+    private var selectionControl: some View {
+        Button(selecting ? "Done" : "Select") {
+            selecting.toggle()
+            selection = []
+        }
+        .frame(minHeight: 44).disabled(store.notes.isEmpty)
+        .accessibilityIdentifier("selectNotes")
+    }
+
+    @ViewBuilder private var deleteControl: some View {
+        if selecting {
+            Button(role: .destructive) { pendingDeletion = selection } label: {
+                Label("Delete", systemImage: "trash").frame(minHeight: 44)
+                    .foregroundStyle(.red)
+            }
+            .disabled(selection.isEmpty).accessibilityIdentifier("deleteSelectedNotes")
+        }
+    }
+
+    private func noteCard(_ note: NoteRecord) -> some View {
+        let selected = selection.contains(note.id)
+        let current = note.id == store.current?.id
+        let excerpt = isFiltering ? store.searchMatches.first(where: { $0.id == note.id })?.excerpt : nil
+        let preview = excerpt ?? (note.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? (note.template == .checkout ? "A sketch of the checkout flow" : "A fresh page for your ideas.") : note.text)
+        return VStack(alignment: .leading, spacing: 0) {
+            Button {
+                if selecting {
+                    if selected { selection.remove(note.id) } else { selection.insert(note.id) }
+                } else {
+                    store.open(note.id)
+                    if store.current?.id == note.id { showingNotebook = false }
+                }
+            } label: {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack {
+                        Image(systemName: note.template == .checkout ? "rectangle.3.group" : "doc.text")
+                            .font(.title2).foregroundStyle(NotebookTheme.burgundy)
+                        Spacer()
+                        if selecting {
+                            Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                                .font(.title2).foregroundStyle(NotebookTheme.burgundy)
+                        } else if current {
+                            Label("Open", systemImage: "circle.fill").font(.caption.weight(.medium))
+                                .foregroundStyle(NotebookTheme.burgundy)
+                        }
+                    }
+                    Text(note.title.isEmpty ? "Untitled note" : note.title)
+                        .font(.title3.weight(.semibold)).lineLimit(2, reservesSpace: true)
+                    Text(preview.replacingOccurrences(of: "\n", with: " "))
+                        .font(.body).foregroundStyle(NotebookTheme.muted).lineLimit(3, reservesSpace: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading).padding(20)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits((selecting ? selected : current) ? .isSelected : [])
+            .accessibilityHint(selecting ? "Select or deselect this note" : "Open note")
+            .accessibilityIdentifier("note-\(note.id)")
+            Divider().padding(.horizontal, 20)
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(note.updatedAt, format: .dateTime.month(.abbreviated).day().year())
+                    Text(note.template == .checkout ? "Reference page" : "\(note.paper.title) paper")
+                }
+                .font(.caption).foregroundStyle(NotebookTheme.muted)
+                Spacer(minLength: 8)
+                if !selecting {
+                    Button(role: .destructive) { pendingDeletion = [note.id] } label: {
+                        Image(systemName: "trash").foregroundStyle(.red).frame(width: 44, height: 44)
+                    }
+                    .accessibilityLabel("Delete \(note.title.isEmpty ? "Untitled note" : note.title)")
+                    .accessibilityIdentifier("delete-\(note.id)")
+                }
+            }
+            .padding(.horizontal, 20).padding(.vertical, 8)
+        }
+        .background(selected ? NotebookTheme.burgundy.opacity(0.06) : .white, in: RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18)
+            .strokeBorder(selected ? NotebookTheme.burgundy : NotebookTheme.ink.opacity(0.12), lineWidth: selected ? 2 : 1))
+    }
+
+    private func createNote() {
+        let previous = store.current?.id
+        store.create()
+        if store.current?.id != previous {
+            selecting = false
+            selection = []
+            showingNotebook = false
+        }
+    }
 }
 
 /// Only the moving annotations observe the viewport; navigation leaves the editor and toolbar alone.
@@ -517,7 +646,7 @@ private struct NoteEditor: View {
 
     private func header(compact: Bool) -> some View {
         HStack(spacing: 8) {
-            Button(action: openNotebook) { dockIcon("line.3.horizontal") }
+            Button(action: openNotebook) { dockIcon("square.grid.2x2") }
                 .accessibilityLabel("Open notebook")
             TextField("Note title", text: Binding(get: { session.note.title }, set: { value in session.edit { $0.title = value } }))
                 .font(.subheadline.weight(.semibold))
