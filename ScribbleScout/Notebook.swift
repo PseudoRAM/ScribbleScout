@@ -125,6 +125,46 @@ final class NoteSession: ObservableObject, Identifiable {
         if searchableChanged { onSearchableChange?() }
     }
 
+    /// Blocks retain the original source and evidence even after the ink changes.
+    @discardableResult
+    func insertBlock(_ suggestion: Suggestion, at bounds: CanvasBounds, undoManager: UndoManager? = nil) -> UUID {
+        let block = InsertedBlock(body: suggestion.answer, caveat: suggestion.caveat,
+                                  evidence: suggestion.evidence, region: suggestion.request.region,
+                                  bounds: bounds, isFixture: suggestion.isFixture)
+        replaceBlocks((note.blocks ?? []) + [block], undoManager: undoManager, action: "Insert AI block")
+        return block.id
+    }
+
+    func updateBlock(_ id: UUID, body: String, undoManager: UndoManager? = nil) {
+        var blocks = note.blocks ?? []
+        guard let index = blocks.firstIndex(where: { $0.id == id }), blocks[index].body != body else { return }
+        blocks[index].body = body
+        blocks[index].editedAt = Date()
+        replaceBlocks(blocks, undoManager: undoManager, action: "Edit AI block")
+    }
+
+    func moveBlock(_ id: UUID, to bounds: CanvasBounds, undoManager: UndoManager? = nil) {
+        var blocks = note.blocks ?? []
+        guard let index = blocks.firstIndex(where: { $0.id == id }), blocks[index].bounds != bounds else { return }
+        blocks[index].bounds = bounds
+        replaceBlocks(blocks, undoManager: undoManager, action: "Move AI block")
+    }
+
+    func deleteBlock(_ id: UUID, undoManager: UndoManager? = nil) {
+        let blocks = note.blocks ?? []
+        guard blocks.contains(where: { $0.id == id }) else { return }
+        replaceBlocks(blocks.filter { $0.id != id }, undoManager: undoManager, action: "Delete AI block")
+    }
+
+    private func replaceBlocks(_ blocks: [InsertedBlock], undoManager: UndoManager?, action: String) {
+        let previous = note.blocks ?? []
+        undoManager?.registerUndo(withTarget: self) { target in
+            target.replaceBlocks(previous, undoManager: undoManager, action: action)
+        }
+        undoManager?.setActionName(action)
+        edit { $0.blocks = blocks }
+    }
+
     func setDrawing(_ value: PKDrawing) {
         drawing = value
         edit { $0.drawingRevision += 1 }

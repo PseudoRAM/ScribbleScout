@@ -545,4 +545,83 @@ struct NotebookTests {
         #expect(path.last?.location == path.first?.location)
         if path.count >= 3 { #expect(path[2].location == CGPoint(x: 260, y: 190)) }
     }
+    @MainActor
+    @Test
+    func testAIBlockAcceptanceEditingUndoReopenAndRecoveryPreserveInkAndEvidence() throws {
+        try withRepository { repository in
+            let originalInk = drawing()
+            let session = NoteSession(note: NoteRecord(), drawing: originalInk, repository: repository)
+            let source = CanvasSource.region(note: session.note, drawing: originalInk, bounds: originalInk.bounds)
+            let evidence = Evidence(kind: .web, title: "Source", url: URL(string: "https://example.com"), excerpt: "Supporting text")
+            let request = AssistanceRequest(region: source, intent: .webResearch, sourceMode: .web, question: "Check this")
+            let suggestion = Suggestion(request: request, answer: "Draft answer", caveat: "Check assumptions", evidence: [evidence], state: .ready)
+            let manager = UndoManager()
+            manager.groupsByEvent = false
+            manager.beginUndoGrouping()
+            let id = session.insertBlock(suggestion, at: CanvasBounds(x: 300, y: 200, width: 320, height: 200), undoManager: manager)
+            manager.endUndoGrouping()
+            #expect(session.note.blocks?.count == 1)
+            manager.undo()
+            #expect(session.note.blocks?.isEmpty == true)
+            manager.redo()
+            #expect(session.note.blocks?.first?.id == id)
+            session.updateBlock(id, body: "Edited by me")
+            session.moveBlock(id, to: CanvasBounds(x: -300, y: 600, width: 320, height: 200))
+            #expect(session.note.blocks?.first?.editedAt != nil)
+            #expect(session.flush())
+            let reopened = try repository.load(session.id)
+            let block = try #require(reopened.note.blocks?.first)
+            #expect(block.body == "Edited by me")
+            #expect(block.evidence == [evidence])
+            #expect(block.region == source)
+            #expect(block.bounds.x == -300)
+            #expect(reopened.drawing.strokes.count == originalInk.strokes.count)
+            #expect(reopened.drawing.bounds == originalInk.bounds)
+            // Commit another metadata change, then corrupt it: recovery retains the block and its provenance.
+            session.edit { $0.title = "Latest" }
+            #expect(session.flush())
+            try Data("interrupted".utf8).write(to: repository.folder(for: session.id).appendingPathComponent("note.json"))
+            #expect(try repository.load(session.id).note.blocks?.first == block)
+            session.deleteBlock(id)
+            #expect(session.note.blocks?.isEmpty == true)
+        }
+    }
+
+    @Test
+    func testRegionIgnoresUnrelatedInkRebasesTranslationAndRejectsChangedOrDeletedSource() throws {
+        let note = NoteRecord()
+        let original = drawing()
+        let source = CanvasSource.region(note: note, drawing: original, bounds: original.bounds.insetBy(dx: -10, dy: -10))
+        #expect(CanvasSource.resolve(source, note: note, drawing: original) != nil)
+        let outside = original.transformed(using: CGAffineTransform(translationX: 1000, y: 1000))
+        let appended = PKDrawing(strokes: original.strokes + outside.strokes)
+        #expect(CanvasSource.resolve(source, note: note, drawing: appended) != nil)
+        let moved = original.transformed(using: CGAffineTransform(translationX: -300, y: 400))
+        let resolved = try #require(CanvasSource.resolve(source, note: note, drawing: moved))
+        #expect(abs(resolved.bounds.x - (source.bounds.x - 300)) < 0.1)
+        #expect(abs(resolved.bounds.y - (source.bounds.y + 400)) < 0.1)
+        #expect(CanvasSource.resolve(source, note: note, drawing: PKDrawing()) == nil)
+        let resized = original.transformed(using: CGAffineTransform(scaleX: 2, y: 2))
+        #expect(CanvasSource.resolve(source, note: note, drawing: resized) == nil)
+        var otherNote = note
+        otherNote.id = UUID()
+        #expect(CanvasSource.resolve(source, note: otherNote, drawing: original) == nil)
+    }
+
+    @Test
+    func testLegacyNotesOpenWithoutBlocksAndTypedSourcesExpireOnlyWhenTextChanges() throws {
+        let note = NoteRecord(text: "Original question")
+        let encoded = try JSONEncoder().encode(note)
+        var json = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        json.removeValue(forKey: "blocks")
+        let legacy = try JSONDecoder().decode(NoteRecord.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(legacy.blocks == nil)
+        let source = CanvasSource.typedRegion(note: legacy)
+        var updated = legacy
+        updated.title = "Renamed"
+        #expect(CanvasSource.resolve(source, note: updated, drawing: drawing()) != nil)
+        updated.text = "Corrected question"
+        #expect(CanvasSource.resolve(source, note: updated, drawing: drawing()) == nil)
+    }
+
 }
