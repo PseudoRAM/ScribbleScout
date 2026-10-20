@@ -5,7 +5,7 @@ final class CanvasInputTests: XCTestCase {
     @MainActor
     func testWritingBeyondStartingPageInEveryDirection() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-fingerDrawing", "YES"]
+        app.launchArguments = ["--offline-demo", "-fingerDrawing", "YES"]
         app.launch()
         app.buttons["Open notebook"].tap()
         app.buttons["newNote"].tap()
@@ -26,7 +26,22 @@ final class CanvasInputTests: XCTestCase {
             guard undo.isEnabled else { XCTFail("Off-page handwriting must be undoable"); return }
             undo.tap()
             XCTAssertLessThanOrEqual(try ink(in: app.screenshot().image).count, empty + 20)
+            if !app.buttons["Redo ink"].exists { app.buttons["Page options"].tap() }
+            app.buttons["Redo ink"].tap()
+            XCTAssertGreaterThan(try ink(in: app.screenshot().image).count, empty + 100)
+            undo.tap()
         }
+        // The final destination is above and left of the starting page.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.30))
+            .press(forDuration: 0.1,
+                   thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.45)),
+                   withVelocity: .slow, thenHoldForDuration: 0.1)
+        app.buttons["Page options"].tap()
+        XCTAssertTrue(app.buttons["Saved on this iPad"].waitForExistence(timeout: 5))
+        app.terminate()
+        app.launch()
+        XCTAssertGreaterThan(try ink(in: app.screenshot().image).count, 100,
+                             "Off-page handwriting and the negative viewport must survive relaunch")
     }
 
     @MainActor

@@ -204,6 +204,7 @@ Choose a simulator available on your Mac if that model is not installed. The sui
 - Retention of only the current and previous drawing snapshots.
 - Preservation of in-memory edits when saving fails, and successful retry after storage becomes available.
 - All paper styles, legacy metadata, reference-page attachments, and rectangle insertion.
+- Negative-coordinate rendering, viewport restoration, source fingerprints, and bounded exports. Canvas UI tests draw in all four directions and check undo/redo and relaunch persistence.
 - Lasso crop masking, neighbouring context, bounded image size, and preservation of ink and clipboard state.
 - On-device search cache persistence/reload, corrupt-cache recovery, unchanged-cache reuse, and native model availability/fallback.
 - Recovery from missing drawings, mismatched note IDs, and invalid drawing paths.
@@ -234,7 +235,7 @@ For a hands-on device check: create two notes, write and erase ink, undo/redo, z
 | `ScribbleScout/NotebookView.swift` | Library, search, note editor, and drawing toolbar |
 | `ScribbleScoutTests/NotebookTests.swift` | Persistence and recovery tests |
 
-The starting content area is **1,000 × 1,400 points** (`NotebookPage.size`); the reference template is **1,448 × 1,026 points**. The scrollable canvas expands around these areas without moving existing ink coordinates. Current simulator checks expose an existing limit: navigation into negative coordinates can leave a surface that does not accept new handwriting. Writing beyond the lower-right page edge works; do not treat all-direction navigation as verified writable space. The paper grid renders only the visible region, and the minimap caches a small preview after ink settles. The implementation uses Apple's frameworks directly; no OwlLuna or other upstream application code was copied. Snapshot writes currently run synchronously and suit a small notebook; larger libraries may need background I/O.
+The starting content area is **1,000 × 1,400 points** (`NotebookPage.size`); the reference template is **1,448 × 1,026 points**. The scrollable canvas expands around these areas. PencilKit uses a fixed positive backing origin so fresh handwriting works left and above the starting page; saved ink, viewports, lasso regions, exports and Scout sources retain page coordinates. The backing reserves 65,536 points left/up; navigation stops at that boundary, while right/down extents grow. Keeping the backing origin stable preserves native ink undo history. The paper grid renders only the visible region, and the minimap caches a small preview after ink settles. The implementation uses Apple's frameworks directly; no OwlLuna or other upstream application code was copied. Snapshot writes currently run synchronously and suit a small notebook; larger libraries may need background I/O.
 
 ## Ask Scout and the demo loop
 
