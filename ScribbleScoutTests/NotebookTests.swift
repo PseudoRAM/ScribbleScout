@@ -600,6 +600,11 @@ struct NotebookTests {
         let resolved = try #require(CanvasSource.resolve(source, note: note, drawing: moved))
         #expect(abs(resolved.bounds.x - (source.bounds.x - 300)) < 0.1)
         #expect(abs(resolved.bounds.y - (source.bounds.y + 400)) < 0.1)
+        var repeated = resolved
+        for _ in 0..<4 {
+            repeated = try #require(CanvasSource.resolve(repeated, note: note, drawing: moved))
+            #expect(repeated.bounds == resolved.bounds, "Repeated validation must not translate the anchor twice")
+        }
         #expect(CanvasSource.resolve(source, note: note, drawing: PKDrawing()) == nil)
         let resized = original.transformed(using: CGAffineTransform(scaleX: 2, y: 2))
         #expect(CanvasSource.resolve(source, note: note, drawing: resized) == nil)

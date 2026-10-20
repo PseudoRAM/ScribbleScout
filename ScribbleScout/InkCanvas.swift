@@ -18,6 +18,7 @@ enum CanvasSource {
     private struct Snapshot: Codable {
         var strokes: [Stroke]
         var paper: String
+        var originalBounds: CanvasBounds
     }
     private static func digest(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
@@ -70,7 +71,7 @@ enum CanvasSource {
     }
     static func region(note: NoteRecord, drawing: PKDrawing, bounds: CGRect) -> NoteRegion {
         let snapshot = Snapshot(strokes: drawing.strokes.filter { $0.renderBounds.intersects(bounds) }.map(identity),
-                                paper: paper(note, in: bounds))
+                                paper: paper(note, in: bounds), originalBounds: CanvasBounds(bounds))
         let encoded = (try? JSONEncoder().encode(snapshot)) ?? Data()
         return NoteRegion(canvasID: note.id, revision: note.drawingRevision, bounds: CanvasBounds(bounds),
                           sourceHash: encoded.base64EncodedString())
@@ -98,7 +99,7 @@ enum CanvasSource {
             translation = delta
         }
         let delta = translation ?? .zero
-        let bounds = region.bounds.cgRect.offsetBy(dx: delta.x, dy: delta.y)
+        let bounds = snapshot.originalBounds.cgRect.offsetBy(dx: delta.x, dy: delta.y)
         // Paper cannot move with ink; only allow translation when no printed content is selected.
         guard snapshot.paper == paper(note, in: bounds),
               delta == .zero || snapshot.paper == digest(Data()) else { return nil }
