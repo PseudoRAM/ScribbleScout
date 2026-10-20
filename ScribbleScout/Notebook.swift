@@ -158,7 +158,7 @@ final class NoteSession: ObservableObject, Identifiable {
 
     private func replaceBlocks(_ blocks: [InsertedBlock], undoManager: UndoManager?, action: String) {
         let previous = note.blocks ?? []
-        undoManager?.registerUndo(withTarget: self) { target in
+        undoManager?.registerUndo(withTarget: self) { [weak undoManager] target in
             target.replaceBlocks(previous, undoManager: undoManager, action: action)
         }
         undoManager?.setActionName(action)
