@@ -7,11 +7,14 @@ final class CanvasControls: ObservableObject {
     @Published var canUndo = false
     @Published var canRedo = false
     @Published var zoom = 1.0
+    @Published var offset = CGPoint.zero
+    @Published var message: String?
 
     func refresh() {
         canUndo = canvas?.undoManager?.canUndo ?? false
         canRedo = canvas?.undoManager?.canRedo ?? false
         zoom = Double(canvas?.zoomScale ?? 1)
+        offset = canvas?.contentOffset ?? .zero
     }
     func undo() {
         canvas?.undoManager?.undo()
@@ -26,22 +29,54 @@ final class CanvasControls: ObservableObject {
         canvas.setZoomScale(canvas.minimumZoomScale, animated: true)
         canvas.setContentOffset(.zero, animated: true)
     }
+
+    func addRectangle(color: UIColor, width: CGFloat) {
+        guard let canvas else { return }
+        let origin = CGPoint(x: (canvas.contentOffset.x + 80) / canvas.zoomScale,
+                             y: (canvas.contentOffset.y + 80) / canvas.zoomScale)
+        let points = [origin, CGPoint(x: origin.x + 180, y: origin.y),
+                      CGPoint(x: origin.x + 180, y: origin.y + 110),
+                      CGPoint(x: origin.x, y: origin.y + 110), origin]
+        let path = PKStrokePath(controlPoints: points.enumerated().map { index, point in
+            PKStrokePoint(location: point, timeOffset: Double(index) * 0.1,
+                          size: CGSize(width: width, height: width), opacity: 1, force: 1, azimuth: 0, altitude: .pi / 2)
+        }, creationDate: Date())
+        replaceDrawing(PKDrawing(strokes: canvas.drawing.strokes + [PKStroke(ink: PKInk(.pen, color: color), path: path)]))
+    }
+
+    private func replaceDrawing(_ drawing: PKDrawing) {
+        guard let canvas else { return }
+        let previous = canvas.drawing
+        canvas.undoManager?.registerUndo(withTarget: self) { $0.replaceDrawing(previous) }
+        canvas.drawing = drawing
+        refresh()
+    }
+
+    func pageImage() -> UIImage? {
+        guard let canvas = canvas as? NotebookCanvasView else { return nil }
+        return UIGraphicsImageRenderer(size: canvas.paper.bounds.size).image { context in
+            NotebookTheme.paper.setFill()
+            context.fill(canvas.paper.bounds)
+            canvas.paper.draw(canvas.paper.bounds)
+            canvas.drawing.image(from: canvas.paper.bounds, scale: 2).draw(in: canvas.paper.bounds)
+        }
+    }
 }
 
 /// A sibling paper layer uses the public scroll offset and zoom scale, without inspecting PencilKit's view hierarchy.
 private final class PaperView: UIView {
-    var style: PaperStyle = .dotted { didSet { setNeedsDisplay() } }
+    var note = NoteRecord() { didSet { if note != oldValue { setNeedsDisplay() } } }
 
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
-        UIColor.secondaryLabel.withAlphaComponent(0.2).setStroke()
-        UIColor.secondaryLabel.withAlphaComponent(0.25).setFill()
-        switch style {
+        UIColor(NotebookTheme.muted).withAlphaComponent(0.22).setStroke()
+        UIColor(NotebookTheme.muted).withAlphaComponent(0.28).setFill()
+        switch note.paper {
         case .blank: break
         case .dotted:
-            for y in stride(from: 32.0, to: bounds.height, by: 28) {
-                for x in stride(from: 32.0, to: bounds.width, by: 28) {
-                    context.fillEllipse(in: CGRect(x: x, y: y, width: 1.5, height: 1.5))
+            for y in stride(from: 15.0, to: bounds.height, by: 25.5) {
+                for x in stride(from: 15.0, to: bounds.width, by: 25.5) {
+                    context.fillEllipse(in: CGRect(x: x, y: y, width: 1.35, height: 1.35))
                 }
             }
         case .ruled:
@@ -52,6 +87,18 @@ private final class PaperView: UIView {
             }
             context.strokePath()
         }
+        if note.template == .checkout { CheckoutPaper.draw(in: context) }
+        if let data = note.attachment, let image = UIImage(data: data) {
+            let width: CGFloat = 300
+            image.draw(in: CGRect(x: 60, y: 60,
+                                  width: width, height: width * image.size.height / image.size.width))
+        }
+        if !note.text.isEmpty && note.template == nil {
+            (note.text as NSString).draw(in: CGRect(x: 60, y: note.attachment == nil ? 60 : 400,
+                                                   width: bounds.width - 120, height: bounds.height - 140),
+                                       withAttributes: [.font: UIFont(name: "Caveat-Regular", size: 32) ?? .systemFont(ofSize: 28),
+                                                        .foregroundColor: UIColor(NotebookTheme.ink)])
+        }
     }
 }
 
@@ -60,14 +107,24 @@ private final class NotebookCanvasView: PKCanvasView {
     var readyForViewport = false
     var initialViewport = PageViewport()
     var viewportDidInitialize: (() -> Void)?
+    var pageSize = NotebookPage.size
 
     override func layoutSubviews() {
         super.layoutSubviews()
         guard bounds.width > 0 else { return }
-        minimumZoomScale = min(1, max(0.25, bounds.width / NotebookPage.size.width))
-        guard !readyForViewport else { alignPaper(); return }
+        let wasFit = abs(zoomScale - minimumZoomScale) < 0.01
+        let previousMinimum = minimumZoomScale
+        minimumZoomScale = min(1, max(0.25, bounds.width / pageSize.width))
+        guard !readyForViewport else {
+            if wasFit && abs(previousMinimum - minimumZoomScale) > 0.001 {
+                zoomScale = minimumZoomScale
+                contentOffset = .zero
+            }
+            alignPaper()
+            return
+        }
         paper.isUserInteractionEnabled = false
-        paper.backgroundColor = .systemBackground
+        paper.backgroundColor = NotebookTheme.paper
         maximumZoomScale = 3
         zoomScale = max(minimumZoomScale, min(maximumZoomScale, initialViewport.zoom))
         let maxX = max(0, contentSize.width - bounds.width)
@@ -89,7 +146,7 @@ private final class CanvasContainer: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         clipsToBounds = true
-        backgroundColor = .systemBackground
+        backgroundColor = NotebookTheme.paper
         addSubview(canvas.paper)
         addSubview(canvas)
     }
@@ -112,14 +169,17 @@ struct InkCanvas: UIViewRepresentable {
         let canvas = container.canvas
         canvas.isOpaque = false
         canvas.backgroundColor = .clear
-        canvas.contentSize = NotebookPage.size
+        canvas.pageSize = NotebookPage.size(for: session.note)
+        canvas.contentSize = canvas.pageSize
+        canvas.paper.frame = CGRect(origin: .zero, size: canvas.pageSize)
         canvas.alwaysBounceVertical = true
         canvas.drawing = session.drawing
         canvas.initialViewport = session.note.viewport
-        canvas.paper.style = session.note.paper
+        canvas.paper.note = session.note
         canvas.tool = tool
         canvas.drawingPolicy = fingerDrawing ? .anyInput : .pencilOnly
         canvas.accessibilityLabel = "Handwriting canvas"
+        canvas.accessibilityValue = session.note.template == .checkout ? CheckoutPaper.transcript : session.note.text
         canvas.accessibilityHint = "Write with Apple Pencil. Pinch to zoom. Use two fingers to scroll when finger drawing is on."
         canvas.delegate = context.coordinator
         controls.canvas = canvas
@@ -137,7 +197,8 @@ struct InkCanvas: UIViewRepresentable {
         if tool is PKLassoTool, !(canvas.tool is PKLassoTool) { canvas.tool = tool }
         let policy: PKCanvasViewDrawingPolicy = fingerDrawing ? .anyInput : .pencilOnly
         if canvas.drawingPolicy != policy { canvas.drawingPolicy = policy }
-        if canvas.paper.style != session.note.paper { canvas.paper.style = session.note.paper }
+        canvas.paper.note = session.note
+        canvas.accessibilityValue = session.note.template == .checkout ? CheckoutPaper.transcript : session.note.text
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(session: session, controls: controls) }

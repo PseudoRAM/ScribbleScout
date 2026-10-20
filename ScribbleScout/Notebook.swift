@@ -11,7 +11,11 @@ enum PaperStyle: String, Codable, CaseIterable, Identifiable {
 /// All ink and future annotation bounds use this fixed page coordinate space.
 enum NotebookPage {
     static let size = CGSize(width: 1000, height: 1400)
+    static let checkoutSize = CGSize(width: 1448, height: 1026)
+    static func size(for note: NoteRecord) -> CGSize { note.template == .checkout ? checkoutSize : size }
 }
+
+enum NoteTemplate: String, Codable { case checkout }
 
 struct PageViewport: Codable, Equatable {
     var zoom: Double = 0 // New pages fit the available width.
@@ -29,6 +33,14 @@ struct NoteRecord: Codable, Identifiable, Equatable {
     var viewport = PageViewport()
     var drawingRevision = 0
     var drawingFile: String?
+    var template: NoteTemplate?
+    var keptResearch: Bool?
+    var attachment: Data?
+
+    static var checkoutExample: Self {
+        let date = Date(timeIntervalSince1970: 1_792_454_400) // 20 October 2026, UTC.
+        return Self(title: "Checkout architecture", createdAt: date, updatedAt: date, template: .checkout)
+    }
 }
 
 struct LocalNotebook {
@@ -190,6 +202,16 @@ final class NotebookStore: ObservableObject {
             let listing = try repository.list()
             notes = listing.notes
             if !listing.warnings.isEmpty { issue = listing.warnings.joined(separator: "\n\n") }
+            // Install the reference page once; existing notes and their last-opened page stay intact.
+            if !notes.contains(where: { $0.template == .checkout }) {
+                let example = NoteSession(note: .checkoutExample, drawing: PKDrawing(), repository: repository)
+                if example.flush() {
+                    notes.insert(example.note, at: 0)
+                    install(example)
+                    return
+                }
+                issue = example.saveError
+            }
             let lastID = UserDefaults.standard.string(forKey: "lastNote").flatMap(UUID.init(uuidString:))
             if let note = notes.first(where: { $0.id == lastID }) ?? notes.first { open(note.id) }
         } catch { issue = "The local notebook could not be opened. \(error.localizedDescription)" }
