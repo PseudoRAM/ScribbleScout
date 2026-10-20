@@ -1,0 +1,20 @@
+Built-in imagegen prompts for the native Scribble Scout app icon.
+Reference: paper concept selected by the user; green background removed.
+
+Layer 1
+Use case: precise-object-edit
+Asset type: full-bleed paper background layer for a native layered iPad app icon.
+Input image: edit target, the chosen Scribble Scout paper icon.
+Primary request: isolate and extend ONLY the warm ivory paper to fill the ENTIRE square canvas edge to edge. Remove ALL green and remove BOTH burgundy ink scribbles. The paper IS the icon background, not an inset card. Keep the delicate paper tooth and a restrained turned-down paper corner at the top right, within the outer 18% of the canvas. Flatten the lighting and remove cast shadows: native Icon Composer will apply depth. The turned corner is a warm ivory slightly lighter triangle with a gently curved inner diagonal edge; no grey or green area behind the corner. The entire square must remain warm ivory paper. Straight-on view, square 1024 by 1024 artwork, opaque, no rounded outer corners, no external border, no padding, no text, no marks. Preserve the reference's quiet warm paper material.
+
+Layer 2
+Use case: background-extraction
+Asset type: upper ink layer for native app icon.
+Input image: edit target, chosen Scribble Scout paper icon.
+Primary request: extract ONLY the UPPER of the two burgundy handwritten swooping S-like scribbles as a clean transparent PNG. Preserve its exact shape, burgundy coloring, tapered round ends and pen texture. Remove the entire paper, fold, green background, shadows and LOWER scribble. Keep this upper ink mark in its original approximate full-square coordinates: bounding box x=22% to79%, y=35% to56%. All surrounding pixels must be genuinely transparent. Full square 1024 by 1024 canvas; do not recenter or enlarge the isolated mark. No extra strokes, no white matte, no checkerboard baked in, no letters added. This is a single separated ink layer, with real alpha.
+
+Layer 3
+Use case: background-extraction
+Asset type: lower ink layer for native app icon.
+Input image: edit target, chosen Scribble Scout paper icon.
+Primary request: extract ONLY the LOWER of the two burgundy handwritten swooping S-like scribbles as a clean transparent PNG. Preserve its exact shape, burgundy coloring, tapered round ends and pen texture. Remove the entire paper, fold, green background, shadows and UPPER scribble. Keep this lower ink mark in its original approximate full-square coordinates: bounding box x=26% to78%, y=61% to74%. All surrounding pixels must be genuinely transparent. Full square 1024 by 1024 canvas; do not recenter or enlarge the isolated mark. No extra strokes, no white matte, no checkerboard baked in, no letters added. This is a single separated ink layer, with real alpha.
