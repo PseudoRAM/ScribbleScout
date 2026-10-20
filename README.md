@@ -10,7 +10,8 @@ A native, pen-first notebook for iPad, built with SwiftUI and PencilKit. Capture
 - Find notes by meaning and exact terms, with matching excerpts, using an on-device vector index.
 - Write with Apple Pencil, or enable finger drawing for the simulator and touch input.
 - Use a pen, highlighter, stroke eraser, or lasso, with ink color and width controls.
-- Undo and redo ink edits; pinch to zoom and return to fit width.
+- Undo and redo ink edits; pinch to zoom, explore an expanding canvas in any direction, and return to the start.
+- Navigate with a minimap that starts collapsed and shows your notes and the current visible area.
 - Choose dotted, ruled, or blank paper and keep typed notes alongside each canvas.
 - Save automatically, restore the last open note, and retain each note's zoom and scroll position.
 - Recover the previous complete snapshot if the latest metadata or ink is unreadable. A failed save keeps the edited note open and offers Retry.
@@ -124,6 +125,8 @@ In Handwriting mode, the toolbar provides the drawing tools, color, and width. *
 
 Keyboard shortcuts: **⌘N** creates a note, **⌘Z** undoes ink, and **⇧⌘Z** redoes ink. Ink undo history belongs to the open canvas and is not saved across app launches.
 
+The canvas grows as you pan beyond its edges, including left and above the starting area. The minimap starts collapsed; tap the small map button to open it. Tap or drag the minimap to jump to another area; its outlined rectangle shows your current view. The house button returns to the starting area at fit width, and the chevron collapses the map. Sharing includes ink beyond the starting page and limits the exported image to 4,096 pixels on its longest edge.
+
 ## Local storage and recovery
 
 Notes live in the app's `Application Support/ScribbleScout` directory, with one UUID folder per note:
@@ -174,6 +177,8 @@ Choose a simulator available on your Mac if that model is not installed. The sui
 - Recovery from missing drawings, mismatched note IDs, and invalid drawing paths.
 - Library ordering and warnings while preserving unreadable files.
 - Autosave of the latest text and ink; viewport saves preserve the edit date and reuse ink.
+- Coalesced viewport updates without editor redraws, navigation in every direction, negative-coordinate ink restoration, and minimap geometry.
+- Continuous touch drawing, undo, saved ink reopening, finger panning, and the initially collapsed minimap through the UI test target.
 
 Tests run locally; there is no automatic cloud test workflow. For local simulator coverage, add `-enableCodeCoverage YES -resultBundlePath build/Testing.xcresult` to the `xcodebuild` command above; remove the previous result bundle before reusing that path.
 
@@ -192,7 +197,7 @@ For a hands-on device check: create two notes, write and erase ink, undo/redo, z
 | `ScribbleScout/NotebookView.swift` | Library, search, note editor, and drawing toolbar |
 | `ScribbleScoutTests/NotebookTests.swift` | Persistence and recovery tests |
 
-Canvas coordinates use a fixed **1,000 × 1,400 point** page, exposed by `NotebookPage.size` for future annotations. The implementation uses Apple's frameworks directly; no OwlLuna or other upstream application code was copied. Snapshot writes currently run synchronously and suit a small notebook; larger libraries may need background I/O.
+The starting content area is **1,000 × 1,400 points** (`NotebookPage.size`); the reference template is **1,448 × 1,026 points**. The scrollable canvas expands around these areas without moving existing ink coordinates. The paper grid renders only the visible region, and the minimap caches a small preview after ink settles. The implementation uses Apple's frameworks directly; no OwlLuna or other upstream application code was copied. Snapshot writes currently run synchronously and suit a small notebook; larger libraries may need background I/O.
 
 ## Next milestones
 
