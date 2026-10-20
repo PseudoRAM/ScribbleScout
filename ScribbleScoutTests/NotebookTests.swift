@@ -366,6 +366,9 @@ struct NotebookTests {
             #expect(abs(center.x - point.x) < 1)
             #expect(abs(center.y - point.y) < 1)
             #expect(canvas.zoomScale == zoom)
+            #expect(canvas.contentSize.width >= canvas.contentOffset.x + canvas.bounds.width,
+                    "The drawable surface must cover the viewport beyond the original page")
+            #expect(canvas.contentSize.height >= canvas.contentOffset.y + canvas.bounds.height)
         }
         controls.addRectangle(color: .red, width: 6)
         canvas.delegate?.canvasViewDrawingDidChange?(canvas)

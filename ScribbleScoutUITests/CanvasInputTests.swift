@@ -3,6 +3,33 @@ import UIKit
 
 final class CanvasInputTests: XCTestCase {
     @MainActor
+    func testWritingBeyondStartingPageInEveryDirection() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-fingerDrawing", "YES"]
+        app.launch()
+        app.buttons["Open notebook"].tap()
+        app.buttons["newNote"].tap()
+        app.buttons["Burgundy ink"].tap()
+        app.buttons["Show canvas minimap"].tap()
+        let map = app.otherElements["canvasMinimap"]
+        for destination in [CGVector(dx: 0.8, dy: 0.8), CGVector(dx: 0.2, dy: 0.8),
+                            CGVector(dx: 0.8, dy: 0.2), CGVector(dx: 0.2, dy: 0.2)] {
+            map.coordinate(withNormalizedOffset: destination).tap()
+            let empty = try ink(in: app.screenshot().image).count
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.30))
+                .press(forDuration: 0.1,
+                       thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.45)),
+                       withVelocity: .slow, thenHoldForDuration: 0.1)
+            XCTAssertGreaterThan(try ink(in: app.screenshot().image).count, empty + 100,
+                                 "Navigating beyond the starting page must leave a writable surface at \(destination)")
+            let undo = app.buttons["Undo ink"]
+            guard undo.isEnabled else { XCTFail("Off-page handwriting must be undoable"); return }
+            undo.tap()
+            XCTAssertLessThanOrEqual(try ink(in: app.screenshot().image).count, empty + 20)
+        }
+    }
+
+    @MainActor
     func testWritingOnStartupNoteAndAfterClearingInk() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-fingerDrawing", "YES"]
