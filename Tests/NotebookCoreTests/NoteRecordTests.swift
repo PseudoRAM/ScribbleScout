@@ -10,7 +10,8 @@ struct NoteRecordTests {
             title: "Project notes 📝", createdAt: Date(timeIntervalSinceReferenceDate: 1_000),
             updatedAt: Date(timeIntervalSinceReferenceDate: 2_000), text: "First line\n第二行",
             paper: paper, viewport: PageViewport(zoom: 1.75, x: 120, y: 240),
-            drawingRevision: 3, drawingFile: "saved.drawing")
+            drawingRevision: 3, drawingFile: "saved.drawing",
+            template: .checkout, keptResearch: true, attachment: Data([1, 2, 3]))
         let data = try JSONEncoder().encode(note)
         #expect(try JSONDecoder().decode(NoteRecord.self, from: data) == note)
     }
@@ -35,6 +36,9 @@ struct NoteRecordTests {
         #expect(note.viewport == PageViewport(zoom: 1.5, x: 30, y: 60))
         #expect(note.drawingRevision == 0)
         #expect(note.drawingFile == nil)
+        #expect(note.template == nil)
+        #expect(note.keptResearch == nil)
+        #expect(note.attachment == nil)
     }
 
     @Test(arguments: ["paper", "viewport"])

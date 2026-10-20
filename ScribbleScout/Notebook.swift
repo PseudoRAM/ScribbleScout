@@ -5,6 +5,8 @@ import SwiftUI
 /// All ink and future annotation bounds use this fixed page coordinate space.
 enum NotebookPage {
     static let size = CGSize(width: 1000, height: 1400)
+    static let checkoutSize = CGSize(width: 1448, height: 1026)
+    static func size(for note: NoteRecord) -> CGSize { note.template == .checkout ? checkoutSize : size }
 }
 
 struct LocalNotebook {
@@ -166,6 +168,16 @@ final class NotebookStore: ObservableObject {
             let listing = try repository.list()
             notes = listing.notes
             if !listing.warnings.isEmpty { issue = listing.warnings.joined(separator: "\n\n") }
+            // Install the reference page once; existing notes and their last-opened page stay intact.
+            if !notes.contains(where: { $0.template == .checkout }) {
+                let example = NoteSession(note: .checkoutExample, drawing: PKDrawing(), repository: repository)
+                if example.flush() {
+                    notes.insert(example.note, at: 0)
+                    install(example)
+                    return
+                }
+                issue = example.saveError
+            }
             let lastID = UserDefaults.standard.string(forKey: "lastNote").flatMap(UUID.init(uuidString:))
             if let note = notes.first(where: { $0.id == lastID }) ?? notes.first { open(note.id) }
         } catch { issue = "The local notebook could not be opened. \(error.localizedDescription)" }

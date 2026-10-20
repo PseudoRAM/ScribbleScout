@@ -231,4 +231,44 @@ struct NotebookTests {
         }
     }
 
+    @Test
+    func testReferencePageAndCardStatePersistWithoutChangingExistingPageCoordinates() throws {
+        try withRepository { repository in
+            var sample = NoteRecord.checkoutExample
+            sample.keptResearch = true
+            sample.attachment = Data([1, 2, 3])
+            let saved = try repository.save(sample, drawing: drawing(), inkChanged: true)
+            let reopened = try repository.load(saved.id)
+            #expect(reopened.note.template == .checkout)
+            #expect(reopened.note.keptResearch == true)
+            #expect(reopened.note.attachment == sample.attachment)
+            #expect(NotebookPage.size(for: reopened.note) == CGSize(width: 1448, height: 1026))
+
+            var legacy = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(NoteRecord())) as? [String: Any])
+            legacy.removeValue(forKey: "template")
+            legacy.removeValue(forKey: "keptResearch")
+            legacy.removeValue(forKey: "attachment")
+            let existing = try JSONDecoder().decode(NoteRecord.self, from: JSONSerialization.data(withJSONObject: legacy))
+            #expect(existing.template == nil)
+            #expect(NotebookPage.size(for: existing) == CGSize(width: 1000, height: 1400))
+        }
+    }
+
+    @MainActor
+    @Test
+    func testInsertRectangleUsesVisiblePageCoordinatesAndKeepsExistingInk() throws {
+        let canvas = PKCanvasView(frame: CGRect(x: 0, y: 0, width: 600, height: 500))
+        canvas.contentSize = NotebookPage.size
+        canvas.drawing = drawing()
+        let controls = CanvasControls()
+        controls.canvas = canvas
+        controls.addRectangle(color: .red, width: 3)
+        #expect(canvas.drawing.strokes.count == 2)
+        let stroke = try #require(canvas.drawing.strokes.last)
+        let path = stroke.path
+        #expect(path.count >= 3)
+        #expect(path.first?.location == CGPoint(x: 80, y: 80))
+        #expect(path.last?.location == path.first?.location)
+        if path.count >= 3 { #expect(path[2].location == CGPoint(x: 260, y: 190)) }
+    }
 }

@@ -14,6 +14,24 @@ A native, pen-first notebook for iPad, built with SwiftUI and PencilKit. Capture
 - Save automatically, restore the last open note, and retain each note's zoom and scroll position.
 - Recover the previous complete snapshot if the latest metadata or ink is unreadable. A failed save keeps the edited note open and offers Retry.
 
+## App icon
+
+<img src="docs/app-icon/preview.png" alt="Scribble Scout icon: two burgundy S-like ink strokes on warm ivory paper with a folded corner" width="160">
+
+The paper fills the icon background; there is no green surround. The native [Icon Composer document](ScribbleScout/AppIcon.icon) contains three 1024 × 1024 PNG assets: the paper and folded corner, the transparent upper scribble, and the transparent lower scribble. Both ink marks remain separate editable layers.
+
+Open `ScribbleScout/AppIcon.icon` in Icon Composer (included with Xcode 26.2) to adjust the layers. The app target uses `AppIcon` in Debug and Release; Xcode compiles the layered icon for iOS/iPadOS 26 and generates compatibility icons for earlier supported systems. The system applies the outer icon mask. Keep the source layers square, preserve ink transparency, and keep the paper opaque. Glass and translucency are disabled for the ink to preserve the burgundy color.
+
+The artwork was separated from the selected concept using built-in imagegen, then normalized to 1024 pixels with `sips`. The upper stroke is positioned 50 points higher in Icon Composer to keep space between the marks. [Generation prompts](docs/app-icon/prompts.txt) are saved with the source assets. For Apple's workflow, see [Creating your app icon using Icon Composer](https://developer.apple.com/documentation/xcode/creating-your-app-icon-using-icon-composer).
+
+To regenerate the README preview on a Mac with Xcode installed:
+
+```sh
+"/Applications/Xcode.app/Contents/Applications/Icon Composer.app/Contents/Executables/ictool" \
+  ScribbleScout/AppIcon.icon --export-image --output-file docs/app-icon/preview.png \
+  --platform iOS --rendition Default --width 1024 --height 1024 --scale 1
+```
+
 ## Requirements
 
 | Requirement | Supported / verified |
