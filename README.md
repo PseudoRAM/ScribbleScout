@@ -46,6 +46,52 @@ In Xcode, choose the **ScribbleScout** scheme and an installed iPad simulator, t
 
 If signing fails with a rejected account login, sign in again in Xcode before retrying. Signing certificates and provisioning profiles are kept outside this repository.
 
+## Secrets and local configuration
+
+The notebook works without credentials. The next demo milestone uses OpenAI; no database, sync, or other provider keys are needed yet. `.env.example` lists the one credential to prepare. Model IDs will be chosen after live access is verified in [BIL-6](https://linear.app/billabyteau/issue/BIL-6/verify-live-openai-access-and-choose-supported-model-paths).
+
+### What to prepare now
+
+1. In the [OpenAI API platform](https://platform.openai.com/), create a separate development project for Scribble Scout, enable API billing if needed, and review its available spending controls and usage alerts. Check actual usage while testing.
+2. Create a project API key with only the permissions needed for the demo. Keep the original in your password manager. Never paste it into this chat, Linear, screenshots, source code, or terminal commands/history.
+3. Create a private `.env.local` from the template using the command below. Then open it in a text editor and put the key after `OPENAI_API_KEY=`. Only edit `.env.local`; leave `.env.example` empty. The command gives a new file owner-only permissions and preserves an existing file:
+
+   ```sh
+   (umask 077; cp -n .env.example .env.local)
+   ```
+
+4. `.env.local` is a plaintext local convenience for future Mac-side API checks or a backend. It is ignored by Git and is **not loaded by the current app**. Keep it outside the Xcode target and Copy Bundle Resources. Preparing the file does not enable AI yet.
+
+### How this works in Swift
+
+Swift/iOS does not automatically read `.env` files. Xcode scheme environment variables apply to launches from Xcode; they are not a deployment mechanism for an installed app. Copying a secret into Swift, `Info.plist`, resources, or build settings can expose it in the app or build artifacts. An ignored file protects against ordinary Git adds; it does not make a bundled value private.
+
+The planned personal prototype ([BIL-10](https://linear.app/billabyteau/issue/BIL-10/implement-direct-openai-transport-and-user-owned-credential-controls)) will accept your own key at runtime, store it in Apple's Keychain or session memory, and offer a delete control. This credential UI is not implemented yet. Keychain is encrypted storage for a user's credentials, not a way to hide a shared developer key shipped with the app. See [Apple's Keychain guidance](https://developer.apple.com/documentation/security/using-the-keychain-to-manage-user-secrets).
+
+For the managed TestFlight/App Store edition, the shared OpenAI key belongs in the backend's secret store. The iPad app will authenticate to that backend with a user's session. [OpenAI's authentication documentation](https://developers.openai.com/api/reference/overview#authentication) says to keep API keys out of client-side code and load them on the server. A hosted backend and authentication are later work ([BIL-25](https://linear.app/billabyteau/issue/BIL-25/build-the-minimal-authenticated-hosted-assistance-backend)). Apple signing stays managed by Xcode; don't put Apple passwords, signing private keys, or certificates in `.env` or the repo.
+
+### Keep credentials out of commits
+
+`.gitignore` excludes local env files, `secrets/`, `Secrets.plist`, `Secrets.xcconfig`, `*.local.xcconfig`, and signing/private-key files. Only `.env.example` is allowed, with empty values. A Python 3 pre-commit check also rejects these files even if force-added, plus likely OpenAI keys and PEM private-key headers in any staged file. It reports filenames/reasons without printing matched values.
+
+Enable the check once per clone:
+
+```sh
+chmod +x .githooks/pre-commit
+git config --local core.hooksPath .githooks
+```
+
+Before committing, verify:
+
+```sh
+git check-ignore .env.local     # should print .env.local
+git ls-files '.env*'           # should list only .env.example once committed
+python3 .githooks/pre-commit   # checks the staged snapshot; silent means pass
+git diff --cached --stat
+```
+
+The hook checks common mistakes, not every possible secret, and can be bypassed. Review staged changes locally too. If a real key is ever committed or shared, revoke/rotate it immediately; deleting the file or adding it to `.gitignore` does not remove it from Git history. Run `python3 .githooks/test-secret-guard.py` for an isolated check of the guard.
+
 ## Using the notebook
 
 Create a note with **New note** and edit its title at the top. Switch between **Handwriting** and **Text** to add ink or typed notes to the same record. Search matches note titles and typed text; it does not recognise handwriting yet.

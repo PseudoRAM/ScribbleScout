@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+"""Check the Git index without printing credential values; needs Python 3."""
+
+import re
+import subprocess
+import sys
+from pathlib import PurePosixPath
+
+
+def git(*args):
+    return subprocess.check_output(["git", *args])
+
+
+def private_path(path):
+    parts = PurePosixPath(path.lower()).parts
+    name = parts[-1]
+    return (
+        (name == ".env" or name.startswith(".env.")) and name != ".env.example"
+        or "secrets" in parts
+        or name in {"secrets.plist", "secrets.xcconfig"}
+        or name.endswith((".local.xcconfig", ".p8", ".p12", ".pfx", ".pem", ".key",
+                          ".mobileprovision", ".provisionprofile"))
+    )
+
+
+SECRET_PATTERNS = (
+    rb"\bsk-[A-Za-z0-9_-]{20,}\b",
+    rb"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----",
+)
+
+
+def problem(path, content):
+    if private_path(path):
+        return "local credential/signing file"
+    if any(re.search(pattern, content) for pattern in SECRET_PATTERNS):
+        return "possible provider key or private key"
+    if PurePosixPath(path).name.lower() == ".env.example":
+        for line in content.splitlines():
+            line = line.strip()
+            if line and not line.startswith(b"#") and b"=" in line:
+                if line.split(b"=", 1)[1].strip():
+                    return "template values must stay empty"
+    return None
+
+
+def main():
+    # Scan the complete staged snapshot, including files added with git add -f.
+    # ponytail: targeted patterns only; use a maintained scanner if providers expand.
+    blocked = False
+    for raw_path in git("ls-files", "--cached", "-z").split(b"\0"):
+        if not raw_path:
+            continue
+        path = raw_path.decode("utf-8", errors="surrogateescape")
+        reason = problem(path, git("show", ":" + path))
+        if reason:
+            print(f"Blocked {path!r}: {reason}. Unstage it and keep secrets local.", file=sys.stderr)
+            blocked = True
+    if blocked:
+        print("If a real credential was exposed, revoke it before continuing.", file=sys.stderr)
+    return int(blocked)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
