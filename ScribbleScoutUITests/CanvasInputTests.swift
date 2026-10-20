@@ -38,6 +38,59 @@ final class CanvasInputTests: XCTestCase {
         XCTAssertGreaterThan(abs(afterPan.centerY - beforePan.centerY), 40, "A finger pan must move the ink with the canvas")
     }
 
+    @MainActor
+    func testNotebookNavigation() throws {
+        let app = XCUIApplication()
+        app.launch()
+        app.buttons["Open notebook"].tap()
+        XCTAssertTrue(app.staticTexts["Scribble Scout"].exists)
+        let firstNote = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "note-")).firstMatch
+        XCTAssertTrue(firstNote.waitForExistence(timeout: 5))
+        let noteID = firstNote.identifier
+        firstNote.tap()
+        XCTAssertTrue(app.textFields["noteTitle"].exists)
+        app.buttons["Open notebook"].tap()
+        XCTAssertTrue(app.buttons[noteID].isSelected)
+
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Notebook navigation portrait"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        let search = app.textFields["Find a note"]
+        search.tap()
+        search.typeText("zzzxqnomatch987654")
+        XCTAssertTrue(app.staticTexts["No notes found"].waitForExistence(timeout: 10))
+        app.buttons["Clear search"].tap()
+        XCTAssertTrue(app.buttons[noteID].waitForExistence(timeout: 5))
+        app.buttons["Close notebook"].tap()
+        app.buttons["Open notebook"].tap()
+        app.buttons["newNote"].tap()
+        XCTAssertEqual(app.textFields["noteTitle"].value as? String, "Untitled note")
+        app.buttons["Open notebook"].tap()
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        Thread.sleep(forTimeInterval: 1) // Let the system rotation finish before capturing the layout.
+        let landscape = XCTAttachment(screenshot: app.screenshot())
+        landscape.name = "Notebook navigation landscape"
+        landscape.lifetime = .keepAlways
+        add(landscape)
+        XCUIDevice.shared.orientation = .portrait
+
+        app.terminate()
+        app.launchArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        app.buttons["Open notebook"].tap()
+        XCTAssertTrue(app.buttons["Close notebook"].isHittable)
+        Thread.sleep(forTimeInterval: 1) // Capture the open drawer after its entrance animation.
+        XCTAssertGreaterThanOrEqual(app.textFields["Find a note"].frame.minX, 0)
+        XCTAssertLessThanOrEqual(app.textFields["Find a note"].frame.maxX, app.frame.maxX)
+        let largeType = XCTAttachment(screenshot: app.screenshot())
+        largeType.name = "Notebook navigation accessibility text"
+        largeType.lifetime = .keepAlways
+        add(largeType)
+    }
+
     private func ink(in image: UIImage) throws -> (count: Int, centerY: Double) {
         let full = try XCTUnwrap(image.cgImage)
         let rect = CGRect(x: Double(full.width) * 0.15, y: Double(full.height) * 0.20,
