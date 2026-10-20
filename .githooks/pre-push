@@ -1,0 +1,39 @@
+#!/usr/bin/env python3
+"""Reject credential files, likely secrets, and build artifacts in outgoing history."""
+
+from pathlib import Path
+import runpy
+import subprocess
+import sys
+
+
+guard = runpy.run_path(str(Path(__file__).with_name("pre-commit")))
+seen = set()
+blocked = False
+for update in sys.stdin:
+    local_ref, local_sha, remote_ref, remote_sha = update.split()
+    if local_sha == "0" * 40:
+        continue
+    revisions = ["git", "rev-list", local_sha]
+    if remote_sha != "0" * 40:
+        revisions.append("^" + remote_sha)
+    else:
+        revisions.extend(["--not", "--remotes"])
+    commits = subprocess.check_output(revisions).splitlines()
+    for commit in commits:
+        entries = subprocess.check_output(["git", "ls-tree", "-r", "-z", commit.decode()]).split(b"\0")
+        for entry in filter(None, entries):
+            metadata, raw_path = entry.split(b"\t", 1)
+            mode, kind, blob = metadata.split()
+            if kind != b"blob" or (blob, raw_path) in seen:
+                continue
+            seen.add((blob, raw_path))
+            path = raw_path.decode("utf-8", errors="surrogateescape")
+            content = subprocess.check_output(["git", "cat-file", "blob", blob.decode()])
+            reason = guard["problem"](path, content)
+            if reason:
+                print(f"Blocked push: {path!r}: {reason}.", file=sys.stderr)
+                blocked = True
+if blocked:
+    print("Remove the offending content from outgoing commits before pushing.", file=sys.stderr)
+sys.exit(int(blocked))

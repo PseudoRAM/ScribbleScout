@@ -3,6 +3,7 @@
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -33,6 +34,7 @@ with tempfile.TemporaryDirectory(prefix="scribble-secrets-") as directory:
     git("init", "-q")
     (root / ".githooks").mkdir()
     shutil.copy2(source / ".githooks/pre-commit", root / ".githooks/pre-commit")
+    shutil.copy2(source / ".githooks/pre-push", root / ".githooks/pre-push")
     shutil.copy2(source / ".gitignore", root / ".gitignore")
     git("config", "core.hooksPath", ".githooks")
     fake_key = "sk-" + "synthetic_test_value_" * 3
@@ -49,6 +51,13 @@ with tempfile.TemporaryDirectory(prefix="scribble-secrets-") as directory:
         ("Config/Secrets.xcconfig", "OPENAI_API_KEY=anything"),
         ("AuthKey.p8", "signing material"),
         ("secrets/credentials.json", "{}"),
+        ("build/compiled", "synthetic build"),
+        ("scripts/__pycache__/helper.pyc", "synthetic build"),
+        ("build-device/compiled", "synthetic build"),
+        ("Exports/ScribbleScout.ipa", "synthetic build"),
+        ("Exports/ScribbleScout.app/ScribbleScout", "synthetic build"),
+        ("Exports/ScribbleScout.xcarchive/Info.plist", "synthetic build"),
+        ("Exports/ScribbleScout.dSYM/Contents/Info.plist", "synthetic build"),
         ("leak with spaces.swift", 'let apiKey = "' + fake_key + '"'),
         ("private.txt", "-----BEGIN " + "PRIVATE KEY-----"),
     ):
@@ -64,4 +73,26 @@ with tempfile.TemporaryDirectory(prefix="scribble-secrets-") as directory:
     stage(".env.example", (source / ".env.example").read_text())
     check(0)
 
-print("Secret guard passed: ignored files, force-adds, staged content, templates, and redaction.")
+    # Exercise outgoing history, including a leak removed from the final snapshot.
+    git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "Clean fixture")
+    base = git("rev-parse", "HEAD").stdout.decode().strip()
+
+    def check_push(expected):
+        tip = git("rev-parse", "HEAD").stdout.decode().strip()
+        update = f"refs/heads/fixture {tip} refs/heads/fixture {base}\n".encode()
+        result = subprocess.run([sys.executable, str(root / ".githooks/pre-push"), "origin", "fixture"],
+                                cwd=root, env=environment, input=update, capture_output=True)
+        assert result.returncode == expected, result.stderr.decode()
+        assert fake_key.encode() not in result.stdout + result.stderr, "Credential printed"
+
+    stage("safe.txt", "safe source")
+    git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "Safe fixture")
+    check_push(0)
+    stage("Exports/App.ipa", "synthetic build")
+    stage("accidental.txt", fake_key)
+    git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "--no-verify", "-qm", "Unsafe fixture")
+    git("rm", "-f", "--", "Exports/App.ipa", "accidental.txt")
+    git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "Removed from tip")
+    check_push(1)
+
+print("Secret guard passed: ignored files, force-adds, staged content, templates, redaction, and outgoing history.")

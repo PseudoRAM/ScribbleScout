@@ -34,6 +34,17 @@ final class CanvasOverview: ObservableObject {
     @Published var snapshot = Snapshot()
 }
 
+struct CanvasSelection: Identifiable {
+    let id = UUID()
+    let image: UIImage
+    let png: Data
+    let contextImage: UIImage
+    let contextPNG: Data
+    let contextBounds: CGRect
+    let bounds: CGRect
+    let outline: [CGPoint]
+}
+
 @MainActor
 final class CanvasControls: ObservableObject {
     weak var canvas: PKCanvasView?
@@ -42,6 +53,57 @@ final class CanvasControls: ObservableObject {
     let viewport = CanvasViewport()
     let overview = CanvasOverview()
     @Published var message: String?
+    @Published var selection: CanvasSelection?
+
+    func captureSelection(outline: [CGPoint]) {
+        selection = nil
+        guard let canvas = canvas as? NotebookCanvasView, outline.count >= 3 else { return }
+        let path = UIBezierPath()
+        path.move(to: outline[0])
+        for point in outline.dropFirst() { path.addLine(to: point) }
+        path.close()
+        let rect = path.bounds
+        var doubledArea: CGFloat = 0
+        for index in outline.indices {
+            let point = outline[index]
+            let next = outline[(index + 1) % outline.count]
+            doubledArea += point.x * next.y - next.x * point.y
+        }
+        guard abs(doubledArea) >= 288 else { return }
+        guard rect.width.isFinite, rect.height.isFinite, rect.minX.isFinite, rect.minY.isFinite,
+              rect.width >= 12, rect.height >= 12 else { return }
+        func render(_ region: CGRect, mask: Bool) -> UIImage {
+            let scale = min(2, 1600 / max(region.width, region.height))
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            format.opaque = true
+            let size = CGSize(width: region.width * scale, height: region.height * scale)
+            return UIGraphicsImageRenderer(size: size, format: format).image { output in
+                UIColor.white.setFill()
+                output.fill(CGRect(origin: .zero, size: size))
+                output.cgContext.scaleBy(x: scale, y: scale)
+                output.cgContext.translateBy(x: -region.minX, y: -region.minY)
+                if mask { path.addClip() }
+                NotebookTheme.paper.setFill()
+                output.fill(region)
+                canvas.paper.draw(canvas.paper.bounds)
+                canvas.drawing.image(from: region, scale: scale).draw(in: region)
+                if !mask {
+                    UIColor(NotebookTheme.burgundy).setStroke()
+                    path.lineWidth = 3 / scale
+                    path.stroke()
+                }
+            }
+        }
+        let image = render(rect, mask: true)
+        // Nearby context is bounded to 300 page points around the selection, with the focus outlined.
+        let contextBounds = rect.insetBy(dx: -300, dy: -300)
+        let contextImage = render(contextBounds, mask: false)
+        guard let png = image.pngData(), let contextPNG = contextImage.pngData() else { return }
+        selection = CanvasSelection(image: image, png: png, contextImage: contextImage, contextPNG: contextPNG,
+                                    contextBounds: contextBounds, bounds: rect, outline: outline)
+    }
+
     func refresh() {
         let undo = canvas?.undoManager?.canUndo ?? false
         let redo = canvas?.undoManager?.canRedo ?? false
@@ -196,6 +258,8 @@ private final class NotebookCanvasView: PKCanvasView {
     var readyForViewport = false
     var initialViewport = PageViewport()
     var viewportDidInitialize: (() -> Void)?
+    var lassoDidBegin: (() -> Void)?
+    var lassoDidFinish: (([CGPoint]) -> Void)?
     var pageSize = NotebookPage.size
     private(set) var worldBounds = CGRect.zero
     private(set) var updatingExtent = false
@@ -271,6 +335,63 @@ private final class NotebookCanvasView: PKCanvasView {
     }
 }
 
+/// Observe the user's region without replacing PencilKit's native lasso or reading the clipboard.
+private final class LassoRegionGesture: UIGestureRecognizer, UIGestureRecognizerDelegate {
+    private var points: [CGPoint] = []
+    private weak var trackedTouch: UITouch?
+
+    override init(target: Any?, action: Selector?) {
+        super.init(target: target, action: action)
+        delegate = self
+        cancelsTouchesInView = false
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard trackedTouch == nil, touches.count == 1, let touch = touches.first,
+              let canvas = view as? NotebookCanvasView, canvas.tool is PKLassoTool,
+              touch.type == .pencil || canvas.drawingPolicy == .anyInput else {
+            state = state == .possible ? .failed : .cancelled
+            return
+        }
+        canvas.lassoDidBegin?()
+        trackedTouch = touch
+        points = [worldPoint(touch)]
+        state = .began
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard state == .began || state == .changed,
+              let touch = trackedTouch, touches.contains(touch) else { return }
+        let point = worldPoint(touch)
+        if let last = points.last, hypot(point.x - last.x, point.y - last.y) >= 2 { points.append(point) }
+        state = .changed
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard state == .began || state == .changed,
+              let touch = trackedTouch, touches.contains(touch) else { return }
+        points.append(worldPoint(touch))
+        (view as? NotebookCanvasView)?.lassoDidFinish?(points)
+        state = .ended
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { state = .cancelled }
+    override func reset() { points = []; trackedTouch = nil; super.reset() }
+    override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+    override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { true }
+
+    private func worldPoint(_ touch: UITouch) -> CGPoint {
+        guard let canvas = view as? NotebookCanvasView else { return .zero }
+        // UIScrollView bounds already include the content offset.
+        let point = touch.location(in: canvas)
+        return CGPoint(x: point.x / canvas.zoomScale, y: point.y / canvas.zoomScale)
+    }
+}
+
 private final class CanvasContainer: UIView {
     let canvas = NotebookCanvasView()
     override init(frame: CGRect) {
@@ -324,6 +445,9 @@ struct InkCanvas: UIViewRepresentable {
         canvas.accessibilityHint = "Write with Apple Pencil. Pinch to zoom. Use two fingers to scroll when finger drawing is on."
         canvas.delegate = context.coordinator
         controls.canvas = canvas
+        canvas.addGestureRecognizer(LassoRegionGesture(target: nil, action: nil))
+        canvas.lassoDidBegin = { [weak controls] in controls?.selection = nil }
+        canvas.lassoDidFinish = { [weak controls] outline in controls?.captureSelection(outline: outline) }
         canvas.viewportDidInitialize = { [weak controls, weak canvas, weak coordinator = context.coordinator] in
             if let canvas { coordinator?.scrollViewDidScroll(canvas) }
             DispatchQueue.main.async { controls?.refresh() }
@@ -340,6 +464,9 @@ struct InkCanvas: UIViewRepresentable {
         let policy: PKCanvasViewDrawingPolicy = fingerDrawing ? .anyInput : .pencilOnly
         if canvas.drawingPolicy != policy { canvas.drawingPolicy = policy }
         let contentChanged = canvas.paper.note != session.note
+        let selectionChanged = canvas.paper.note.text != session.note.text ||
+            canvas.paper.note.template != session.note.template || canvas.paper.note.attachment != session.note.attachment
+        if selectionChanged { DispatchQueue.main.async { controls.selection = nil } }
         canvas.paper.note = session.note
         canvas.pattern.style = session.note.paper
         if contentChanged { context.coordinator.scheduleOverview(canvas) }
@@ -356,6 +483,7 @@ struct InkCanvas: UIViewRepresentable {
         init(session: NoteSession, controls: CanvasControls) { self.session = session; self.controls = controls }
 
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
+            controls.selection = nil
             session.setDrawing(canvasView.drawing)
             scheduleOverview(canvasView)
             // Undo registration finishes after PencilKit's delegate callback.

@@ -21,3 +21,12 @@ xcuserdata/
 *.key
 *.mobileprovision
 *.provisionprofile
+/output
+
+# Compiled app bundles and distribution artifacts must never enter the public repo.
+*.app/
+*.ipa
+*.xcarchive/
+*.dSYM/
+__pycache__/
+*.py[cod]

@@ -6,6 +6,7 @@ struct NotebookView: View {
     @ObservedObject var store: NotebookStore
     @State private var search = ""
     @State private var showingNotebook = false
+    @StateObject private var scout = ScoutSession()
 
     private var filteredNotes: [NoteRecord] {
         let notes = store.searchableNotes
@@ -17,7 +18,7 @@ struct NotebookView: View {
     var body: some View {
         ZStack(alignment: .leading) {
             if let session = store.current {
-                NoteEditor(session: session) { showingNotebook.toggle() }.id(session.id)
+                NoteEditor(session: session, scout: scout) { showingNotebook.toggle() }.id(session.id)
             } else {
                 ContentUnavailableView {
                     Label("A little room to think.", systemImage: "pencil.and.scribble")
@@ -205,6 +206,38 @@ private struct CanvasMinimap: View {
     }
 }
 
+private struct LassoAssistanceOverlay: View {
+    @ObservedObject var controls: CanvasControls
+    @ObservedObject var viewport: CanvasViewport
+    var ask: (CanvasSelection) -> Void
+
+    var body: some View {
+        GeometryReader { geometry in
+            if let selection = controls.selection {
+                let zoom = viewport.value.zoom
+                let x = selection.bounds.minX * zoom - viewport.value.x
+                let bottom = selection.bounds.maxY * zoom - viewport.value.y
+                Path { path in
+                    let points = selection.outline.map { CGPoint(x: $0.x * zoom - viewport.value.x, y: $0.y * zoom - viewport.value.y) }
+                    if let first = points.first {
+                        path.move(to: first)
+                        for point in points.dropFirst() { path.addLine(to: point) }
+                        path.closeSubpath()
+                    }
+                }
+                .stroke(NotebookTheme.burgundy, style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                .allowsHitTesting(false)
+                Button("Ask AI", systemImage: "sparkles") { ask(selection) }
+                    .font(.body.weight(.semibold)).buttonStyle(.borderedProminent)
+                    .frame(minHeight: 44)
+                    .offset(x: max(12, min(x, geometry.size.width - 150)),
+                            y: max(12, min(bottom + 8, geometry.size.height - 64)))
+                    .accessibilityIdentifier("askAISelection")
+            }
+        }
+    }
+}
+
 private enum DrawingTool: String, CaseIterable {
     case pen = "Pen", marker = "Highlighter", eraser = "Eraser", lasso = "Lasso"
     var symbol: String {
@@ -224,6 +257,7 @@ private struct SharedPage: Identifiable {
 
 private struct NoteEditor: View {
     @ObservedObject var session: NoteSession
+    @ObservedObject var scout: ScoutSession
     var openNotebook: () -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @StateObject private var controls = CanvasControls()
@@ -231,6 +265,8 @@ private struct NoteEditor: View {
     @State private var inkColor = NotebookTheme.ink
     @State private var width = 3.0
     @State private var editingText = false
+    @State private var showingScout = false
+    @State private var scoutSelection: CanvasSelection?
     @State private var contextAction: ContextAction?
     @State private var sharedPage: SharedPage?
     @State private var selectedPhoto: PhotosPickerItem?
@@ -262,6 +298,11 @@ private struct NoteEditor: View {
                         CanvasAnnotations(session: session, viewport: controls.viewport) { contextAction = $0 }
                     }
                 }
+                .overlay {
+                    LassoAssistanceOverlay(controls: controls, viewport: controls.viewport) { selection in
+                        scoutSelection = selection
+                    }
+                }
                 .clipped()
                 .overlay(alignment: .bottomTrailing) {
                     CanvasMinimap(controls: controls, viewport: controls.viewport, overview: controls.overview)
@@ -277,9 +318,12 @@ private struct NoteEditor: View {
             }
             .background(Color(uiColor: NotebookTheme.paper))
         }
+        .sheet(isPresented: $showingScout) { ScoutSheet(credentials: scout) }
+        .sheet(item: $scoutSelection) { selection in ScoutSheet(credentials: scout, selection: selection) }
         .sheet(isPresented: $editingText) { textSheet }
         .sheet(item: $contextAction) { action in contextSheet(action) }
         .sheet(item: $sharedPage) { page in ShareSheet(items: [page.image]) }
+        .onChange(of: selectedTool) { _, _ in controls.selection = nil }
         .onChange(of: selectedPhoto) { _, photo in
             Task {
                 guard let photo else { return }
@@ -355,6 +399,7 @@ private struct NoteEditor: View {
             }
             Button("Return to canvas start", systemImage: "house", action: controls.resetZoom)
             Button("Typed notes", systemImage: "textformat") { editingText = true }
+            Button("Ask Scout", systemImage: "sparkles") { scoutSelection = nil; showingScout = true }
             if session.note.attachment != nil {
                 Button("Remove photo", systemImage: "photo.badge.minus") { session.edit { $0.attachment = nil } }
             }
@@ -412,6 +457,7 @@ private struct NoteEditor: View {
 
     private var insertActions: some View {
         HStack(spacing: 8) {
+            Button { scoutSelection = nil; showingScout = true } label: { dockIcon("sparkles") }.accessibilityLabel("Ask Scout")
             Button { editingText = true } label: { dockIcon("textformat") }.accessibilityLabel("Typed notes")
             Button { controls.addRectangle(color: UIColor(inkColor), width: width) } label: { dockIcon("square") }
                 .accessibilityLabel("Insert rectangle")
